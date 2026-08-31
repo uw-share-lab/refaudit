@@ -12,16 +12,14 @@ fine and only the identifier is wrong.
 ## Install
 
 ```bash
-pip install refaudit
-```
-
-Or straight from source:
-
-```bash
 pip install git+https://github.com/uw-share-lab/refaudit.git
 ```
 
 Python 3.10+. No runtime dependencies.
+
+> PyPI publishing is wired up (Trusted Publishing, see `.github/workflows/release.yml`)
+> but no release has been cut yet, so `pip install refaudit` will not work until
+> the first tagged release. Use the command above in the meantime.
 
 ## Quick start
 
