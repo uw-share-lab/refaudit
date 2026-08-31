@@ -13,6 +13,7 @@ pre-submission hook or a CI step keys off: 0 clean, 1 something to look at,
 from __future__ import annotations
 
 import csv
+import os
 
 import pytest
 
@@ -287,3 +288,40 @@ def test_a_doi_disowned_by_one_agency_is_not_a_finding(bib, stub, tmp_path):
     stub(NotFound("fake", "not registered here"), name="fake:doi")
     assert main([str(bib), "--email", "a@b.org", "--out", str(tmp_path / "o"),
                  "--no-cache", "--quiet"]) == 0
+
+
+# --- shared pacing ----------------------------------------------------------
+
+def test_no_shared_pacing_is_passed_through_to_the_resolvers(bib, stub, tmp_path,
+                                                             monkeypatch):
+    """The flag is read when the first resolver is built, so it has to reach
+    the environment before that happens."""
+    monkeypatch.delenv("REFAUDIT_NO_SHARED_PACING", raising=False)
+    seen = {}
+
+    def spy(*a, **k):
+        seen["flag"] = os.environ.get("REFAUDIT_NO_SHARED_PACING")
+        return [Fake(_match)]
+
+    monkeypatch.setattr("refaudit.cli.default_resolvers", spy)
+    monkeypatch.setattr("refaudit.cli.DoiExistence", lambda *a, **k: None)
+
+    main([str(bib), "--email", "a@b.org", "--out", str(tmp_path / "o"),
+          "--no-cache", "--quiet", "--no-shared-pacing"])
+    assert seen["flag"] == "1"
+
+
+def test_shared_pacing_is_on_unless_asked_otherwise(bib, stub, tmp_path, monkeypatch):
+    monkeypatch.delenv("REFAUDIT_NO_SHARED_PACING", raising=False)
+    seen = {}
+
+    def spy(*a, **k):
+        seen["flag"] = os.environ.get("REFAUDIT_NO_SHARED_PACING")
+        return [Fake(_match)]
+
+    monkeypatch.setattr("refaudit.cli.default_resolvers", spy)
+    monkeypatch.setattr("refaudit.cli.DoiExistence", lambda *a, **k: None)
+
+    main([str(bib), "--email", "a@b.org", "--out", str(tmp_path / "o"),
+          "--no-cache", "--quiet"])
+    assert not seen["flag"]

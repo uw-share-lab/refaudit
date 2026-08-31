@@ -24,7 +24,7 @@ from typing import Protocol, runtime_checkable
 from .._version import __version__
 from ..http import HttpClient
 from ..models import Entry, Outcome
-from ..ratelimit import CircuitBreaker, TokenBucket
+from ..ratelimit import CircuitBreaker, SharedTokenBucket, TokenBucket
 
 
 @dataclass(frozen=True)
@@ -59,11 +59,31 @@ _HOST_PACING: dict[str, tuple[TokenBucket, CircuitBreaker]] = {}
 _HOST_PACING_LOCK = threading.Lock()
 
 
+def _new_bucket(host: str, rate: RateSpec) -> TokenBucket:
+    """A bucket shared with every other refaudit this user is running.
+
+    Per-process pacing is right across *users*, since each runs under their own
+    contact address and is a separate identified caller. It is wrong for one
+    person running several at once -- two terminals, a job array -- because the
+    service sees a single caller at a multiple of the promised rate. The state
+    lives under the user's own cache directory, so different people on a shared
+    machine stay independent, which is what we want.
+
+    ``REFAUDIT_NO_SHARED_PACING=1`` opts out, for a filesystem where this is a
+    bad idea or anyone who would rather refaudit wrote nothing outside its
+    output directory. Sharing also degrades to this on any error, so the opt-out
+    is a preference rather than a safety valve.
+    """
+    if os.environ.get("REFAUDIT_NO_SHARED_PACING", "").strip():
+        return TokenBucket(rate.per_second, rate.burst)
+    return SharedTokenBucket(rate.per_second, rate.burst, host=host)
+
+
 def _pacing_for(host: str, rate: RateSpec) -> tuple[TokenBucket, CircuitBreaker]:
     with _HOST_PACING_LOCK:
         existing = _HOST_PACING.get(host)
         if existing is None:
-            pacing = (TokenBucket(rate.per_second, rate.burst), CircuitBreaker())
+            pacing = (_new_bucket(host, rate), CircuitBreaker())
             _HOST_PACING[host] = pacing
             return pacing
         bucket, breaker = existing

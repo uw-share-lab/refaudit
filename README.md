@@ -92,6 +92,7 @@ error — so it drops into CI or a pre-submission script.
 | `--title-match N` | similarity at or above which two titles are the same work (default 0.75) |
 | `--workers` | entries checked in parallel (default 4). Each service keeps its own rate limit regardless |
 | `--no-duplicates` | skip the offline duplicate-entry pass |
+| `--no-shared-pacing` | do not share rate limits with other refaudit runs on this machine |
 | `--quiet` | suppress per-entry progress, print only the summary |
 | `-v`, `--verbose` | log every request, retry and rate-limit change to stderr |
 
@@ -221,19 +222,41 @@ separate, more reliable pool, and it is the courtesy their docs ask for.
 
 ### Several people running it at once
 
-Pacing is per process, and that is the right scope. Everyone runs under their own
-`--email`, so each of you is a separate identified caller with your own allowance,
-your own backoff and your own circuit breaker — one person hitting a 429 does not
-slow anybody else down, and no amount of parallel use by a lab gets an individual
-blocked. There is nothing to coordinate and no shared limit to configure.
+Everyone runs under their own `--email`, so each of you is a separate identified
+caller with your own allowance, your own backoff and your own circuit breaker.
+One person hitting a 429 does not slow anybody else down, and no amount of
+parallel use by a lab gets an individual blocked. There is nothing to configure.
 
-Two runs *in the same directory* do share one thing: the cache file. That is
-safe. Writes are atomic, each flush merges what is already on disk rather than
+### Several runs by one person at once
+
+Two terminals, a shell loop or a cluster job array are a different matter: those
+are one caller as far as Crossref is concerned, and a per-process limit would
+send it a multiple of the rate we promised.
+
+So the token bucket for each host is shared by every refaudit *you* are running,
+through a small state file under your own cache directory (`~/.cache/refaudit/`,
+or `%LOCALAPPDATA%` on Windows). Four runs at once share one allowance rather
+than taking four. A `429` in any of them slows all of them, and the recovery
+afterwards is shared too.
+
+It is per user, not per machine, which is deliberate: two people on a shared
+server are still two identified callers and should not be throttling each other.
+
+Everything about it degrades. If the state file cannot be created, read, written
+or locked, each run paces itself exactly as it did before — correct on its own,
+uncoordinated with the others — so the worst case is the behaviour that came
+first. `--no-shared-pacing`, or `REFAUDIT_NO_SHARED_PACING=1`, turns it off
+entirely and keeps refaudit from writing anything outside `--out`.
+
+Two runs *in the same directory* also share the cache file, which is safe.
+Writes are atomic, each flush merges what is already on disk rather than
 overwriting it, and the read-merge-write happens under a lock, so neither run
-loses the other's entries. Where a filesystem will not honour the lock, as some
-network mounts do not, the merge still runs and the worst case is a lookup done
-twice. If you would rather keep the runs entirely separate, give each one
-its own `--out`.
+loses the other's entries. Where `flock` is not honoured, as on some network
+mounts, the lock falls back to an atomic lock *directory* with two rules that
+keep it from being worse than no lock at all: one left behind by a process that
+died is taken over after 30 seconds, and waiting for it is bounded, after which
+the run carries on unlocked rather than not at all. If you would rather keep the
+runs entirely separate, give each one its own `--out`.
 
 ## Security
 

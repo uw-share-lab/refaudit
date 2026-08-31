@@ -15,7 +15,8 @@ import json
 import threading
 import time
 
-from refaudit.cache import Cache, _exclusive
+from refaudit.cache import Cache
+from refaudit.filelock import exclusive as _exclusive
 
 
 def _entries(path):
@@ -106,9 +107,12 @@ def test_many_concurrent_flushes_keep_every_entry(tmp_path):
 
 def test_flushing_still_works_when_the_lock_cannot_be_taken(tmp_path, monkeypatch):
     """Best effort: an unlockable filesystem must not stop us writing."""
-    import refaudit.cache as cache_mod
+    import refaudit.filelock as filelock_mod
 
-    monkeypatch.setattr(cache_mod, "_lock_file", None)
+    # No kernel lock and no lockable directory either: the last-resort path.
+    monkeypatch.setattr(filelock_mod, "_lock_fd", None)
+    monkeypatch.setattr("os.mkdir", lambda *a, **k: (_ for _ in ()).throw(
+        OSError("read-only filesystem")))
 
     path = tmp_path / "cache.json"
     c = Cache(path)

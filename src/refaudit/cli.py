@@ -89,6 +89,12 @@ def build_parser() -> argparse.ArgumentParser:
                         "service allows")
     p.add_argument("--no-duplicates", action="store_true",
                    help="skip the offline duplicate-entry pass")
+    p.add_argument("--no-shared-pacing", action="store_true",
+                   help="do not share rate limits with other refaudit runs on "
+                        "this machine (or set REFAUDIT_NO_SHARED_PACING=1). "
+                        "Sharing keeps two terminals from sending a service "
+                        "twice the rate we promised it; turning it off means "
+                        "refaudit writes nothing outside --out")
     p.add_argument("--quiet", action="store_true", help="only print the summary")
     p.add_argument("-v", "--verbose", action="store_true",
                    help="log every request, retry and rate-limit change to stderr. "
@@ -128,6 +134,11 @@ def main(argv: list[str] | None = None) -> int:
                 print("error: no cited entries found; is --tex pointing at the right place?",
                       file=sys.stderr)
                 return 2
+
+    if args.no_shared_pacing:
+        # Read when the first resolver is built, so it has to be set before
+        # default_resolvers runs rather than passed down through it.
+        os.environ["REFAUDIT_NO_SHARED_PACING"] = "1"
 
     only = [r.strip() for r in args.resolvers.split(",") if r.strip()] or None
     try:
