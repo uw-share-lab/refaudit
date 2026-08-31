@@ -6,9 +6,9 @@ produce a statement about an entry. Everything else is secondary.
 
 import pytest
 
-from refcheck.cache import Cache
-from refcheck.checker import Checker
-from refcheck.models import Entry, Found, NotFound, Record, Unavailable, Verdict
+from refaudit.cache import Cache
+from refaudit.checker import Checker
+from refaudit.models import Entry, Found, NotFound, Record, Unavailable, Verdict
 
 
 def entry(key="k", **fields):

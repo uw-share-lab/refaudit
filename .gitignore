@@ -8,5 +8,5 @@ build/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
-refcheck-out/
+refaudit-out/
 .DS_Store

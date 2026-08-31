@@ -67,7 +67,7 @@ class HttpResolver:
                 # of any URL that might be logged.
                 key_header = (self.api_key_header, value)
         self.http = HttpClient(
-            user_agent=f"refcheck/0.1 (+https://github.com/uw-share-lab/refcheck; mailto:{contact_email})",
+            user_agent=f"refaudit/0.1 (+https://github.com/uw-share-lab/refaudit; mailto:{contact_email})",
             bucket=TokenBucket(self.rate.per_second, self.rate.burst),
             breaker=CircuitBreaker(),
             timeout=timeout,

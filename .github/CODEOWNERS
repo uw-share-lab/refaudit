@@ -1,0 +1,3 @@
+# Every change needs review from a code owner before it can reach main.
+# Branch protection enforces this; see CONTRIBUTING.md.
+*       @jeevanp03

@@ -3,7 +3,7 @@ requires = ["hatchling>=1.20"]
 build-backend = "hatchling.build"
 
 [project]
-name = "refcheck"
+name = "refaudit"
 version = "0.1.0"
 description = "Verify bibliography entries against Crossref, arXiv and OpenAlex before you submit."
 readme = "README.md"
@@ -25,14 +25,14 @@ xml = ["defusedxml>=0.7"]
 dev = ["pytest>=7", "mypy>=1.5", "ruff>=0.4"]
 
 [project.scripts]
-refcheck = "refcheck.cli:main"
+refaudit = "refaudit.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/uw-share-lab/refcheck"
-Issues = "https://github.com/uw-share-lab/refcheck/issues"
+Homepage = "https://github.com/uw-share-lab/refaudit"
+Issues = "https://github.com/uw-share-lab/refaudit/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/refcheck"]
+packages = ["src/refaudit"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

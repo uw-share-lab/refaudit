@@ -17,9 +17,9 @@ from .resolvers import AVAILABLE, default_resolvers
 
 EPILOG = """\
 examples:
-  refcheck refs.bib --email you@uni.edu
-  refcheck refs.bib --email you@uni.edu --tex paper/sections --only-cited
-  refcheck refs.bib --email you@uni.edu --resolvers crossref:doi,openalex
+  refaudit refs.bib --email you@uni.edu
+  refaudit refs.bib --email you@uni.edu --tex paper/sections --only-cited
+  refaudit refs.bib --email you@uni.edu --resolvers crossref:doi,openalex
 
 exit status:
   0  no findings
@@ -30,14 +30,14 @@ exit status:
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="refcheck",
+        prog="refaudit",
         description="Verify .bib entries against Crossref, arXiv and OpenAlex.",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("bib", type=Path, help="path to the .bib file")
-    p.add_argument("--email", default=os.environ.get("REFCHECK_EMAIL", ""),
-                   help="contact address sent to the APIs (or set REFCHECK_EMAIL). "
+    p.add_argument("--email", default=os.environ.get("REFAUDIT_EMAIL", ""),
+                   help="contact address sent to the APIs (or set REFAUDIT_EMAIL). "
                         "Crossref and OpenAlex give identified callers a better pool.")
     p.add_argument("--tex", type=Path,
                    help="directory or file of LaTeX sources, to determine which keys are cited")
@@ -45,8 +45,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="check only keys cited in --tex (uncited entries never reach the PDF)")
     p.add_argument("--resolvers", default="",
                    help=f"comma-separated subset of: {', '.join(AVAILABLE)}")
-    p.add_argument("--out", type=Path, default=Path("refcheck-out"),
-                   help="output directory (default: refcheck-out)")
+    p.add_argument("--out", type=Path, default=Path("refaudit-out"),
+                   help="output directory (default: refaudit-out)")
     p.add_argument("--cache", type=Path, help="cache file (default: <out>/cache.json)")
     p.add_argument("--no-cache", action="store_true", help="ignore and do not write the cache")
     p.add_argument("--ttl-days", type=float, default=90.0, help="cache lifetime (default: 90)")
@@ -54,7 +54,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--title-match", type=float, default=Thresholds.title_match,
                    help="similarity at or above which two titles are the same work")
     p.add_argument("--quiet", action="store_true", help="only print the summary")
-    p.add_argument("--version", action="version", version=f"refcheck {__version__}")
+    p.add_argument("--version", action="version", version=f"refaudit {__version__}")
     return p
 
 
@@ -65,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"error: no such file: {args.bib}", file=sys.stderr)
         return 2
     if not args.email:
-        print("error: --email is required (or set REFCHECK_EMAIL).\n"
+        print("error: --email is required (or set REFAUDIT_EMAIL).\n"
               "       Crossref and OpenAlex ask callers to identify themselves, and\n"
               "       doing so puts you in a more reliable request pool.", file=sys.stderr)
         return 2
@@ -136,7 +136,7 @@ def _report(results, out: Path, only_cited: bool) -> int:
     findings = [r for r in results if r.verdict.is_finding]
     unverified = [r for r in results if r.verdict is Verdict.UNVERIFIED]
 
-    lines = ["refcheck", "=" * 72,
+    lines = ["refaudit", "=" * 72,
              f"entries checked : {len(results)}" + ("  (cited only)" if only_cited else ""),
              "counts          : " + ", ".join(f"{k}={v}" for k, v in sorted(counts.items())), ""]
 

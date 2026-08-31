@@ -5,7 +5,7 @@ Docs: https://api.crossref.org  /  https://www.crossref.org/documentation/retrie
 Crossref asks callers to identify themselves with a mailto in the User-Agent;
 doing so puts us in the "polite pool", which is both faster and less likely to
 be throttled. It publishes ``X-Rate-Limit-Limit`` / ``X-Rate-Limit-Interval``
-headers, which :class:`~refcheck.http.HttpClient` reads and obeys, so the value
+headers, which :class:`~refaudit.http.HttpClient` reads and obeys, so the value
 below is only the starting pace.
 """
 

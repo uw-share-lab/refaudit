@@ -1,9 +1,9 @@
-"""refcheck -- verify bibliography entries against external indexes.
+"""refaudit -- verify bibliography entries against external indexes.
 
 Built for the case where a venue runs an automated check for hallucinated or
 malformed references and a false entry costs you a desk reject.
 
-    from refcheck import Checker, parse_file, default_resolvers
+    from refaudit import Checker, parse_file, default_resolvers
 
     entries = parse_file("refs.bib")
     checker = Checker(default_resolvers("you@example.org"))

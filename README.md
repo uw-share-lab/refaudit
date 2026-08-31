@@ -1,4 +1,4 @@
-# refcheck
+# refaudit
 
 Verify the entries in a `.bib` against Crossref, arXiv and OpenAlex, and report
 the ones a human needs to look at.
@@ -9,11 +9,45 @@ that resolves to **a different paper than the entry claims**. That one is
 invisible when you read the reference list, because the title and authors look
 fine and only the identifier is wrong.
 
-```
-pip install refcheck
+## Install
 
-refcheck refs.bib --email you@university.edu
-refcheck refs.bib --email you@university.edu --tex paper/sections --only-cited
+Not on PyPI yet — install from this repository:
+
+```bash
+pip install git+https://github.com/uw-share-lab/refaudit.git
+```
+
+Python 3.10+. No runtime dependencies.
+
+## Quick start
+
+```bash
+# every entry in the file
+refaudit refs.bib --email you@uwaterloo.ca
+
+# only the entries actually cited in the paper, which is usually what you want
+refaudit refs.bib --email you@uwaterloo.ca --tex paper/sections --only-cited
+```
+
+`--email` is required. Crossref and OpenAlex give identified callers a separate,
+more reliable request pool, and it is the courtesy their documentation asks for.
+Set it once instead of typing it each time:
+
+```bash
+export REFAUDIT_EMAIL=you@uwaterloo.ca
+```
+
+Results are written to `refaudit-out/` as `reference_check.txt` (readable) and
+`reference_check.csv` (sortable), and printed to stdout.
+
+### Working from Overleaf
+
+Download the `.bib` (Menu → Download → Source, or just the file), then point
+`--tex` at the unzipped `sections/` directory so `--only-cited` can tell which
+keys actually reach the PDF:
+
+```bash
+refaudit sample-base.bib --email you@uwaterloo.ca --tex sections/ --only-cited
 ```
 
 ## What it reports
@@ -31,6 +65,25 @@ refcheck refs.bib --email you@university.edu --tex paper/sections --only-cited
 
 Exit status is `1` if there is at least one finding, `0` if not, `2` on a usage
 error — so it drops into CI or a pre-submission script.
+
+## Options
+
+| Flag | Effect |
+|---|---|
+| `--email` | contact address sent to the APIs (or `REFAUDIT_EMAIL`). Required. |
+| `--tex PATH` | LaTeX file or directory, used to work out which keys are cited |
+| `--only-cited` | check only cited keys; requires `--tex` |
+| `--resolvers` | comma-separated subset of `crossref:doi`, `arxiv:id`, `openalex`, `crossref:title` |
+| `--out DIR` | output directory (default `refaudit-out`) |
+| `--cache PATH` / `--no-cache` | cache location, or disable it |
+| `--ttl-days N` | how long cached results stay valid (default 90) |
+| `--timeout N` | per-request timeout in seconds (default 20) |
+| `--title-match N` | similarity at or above which two titles are the same work (default 0.75) |
+| `--quiet` | suppress per-entry progress, print only the summary |
+
+A run over a few hundred references takes minutes, because it is deliberately
+paced. Successful lookups are cached, so it is safe to interrupt with Ctrl-C and
+re-run — it picks up where it stopped.
 
 ## The one design rule
 
@@ -89,10 +142,35 @@ separate, more reliable pool, and it is the courtesy their docs ask for.
   often on a machine someone else administers; that is the wrong moment to widen
   the supply chain.
 
+## Troubleshooting
+
+**Lots of `UNVERIFIED` results.** A source refused your network. arXiv in
+particular rate-limits by IP and will 429 an entire institution or VPN
+regardless of your own pace. These are not findings — the entries were simply
+not checked. Try again later, from a different network, or lean on OpenAlex,
+which indexes arXiv identifiers too:
+
+```bash
+refaudit refs.bib --email you@uwaterloo.ca --resolvers crossref:doi,openalex
+```
+
+**A correct entry is flagged `NOT_FOUND`.** Workshop papers, theses and
+tech reports are often in no citation index. If the entry has no DOI and no
+arXiv id there is nothing to verify it against; confirm it by hand and move on.
+
+**A correct entry is flagged `TITLE_MISMATCH`.** This one is worth taking
+seriously: it means the DOI or arXiv id in your `.bib` resolves to a different
+paper. Usually the identifier was copied from the wrong row, or generated rather
+than looked up. Check the `found` line in the report against what you meant to
+cite.
+
+**Everything is `SKIPPED`.** `@misc` and `@online` entries with no identifier
+cannot be checked. That is expected for datasets, blog posts and software.
+
 ## Library use
 
 ```python
-from refcheck import Checker, default_resolvers, parse_file
+from refaudit import Checker, default_resolvers, parse_file
 
 entries = parse_file("refs.bib")
 checker = Checker(default_resolvers("you@university.edu"))

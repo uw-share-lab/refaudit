@@ -1,7 +1,7 @@
 """BibTeX parsing and string normalisation."""
 
-from refcheck.bibtex import cited_keys, parse_string
-from refcheck.normalize import (
+from refaudit.bibtex import cited_keys, parse_string
+from refaudit.normalize import (
     clean_arxiv_id,
     clean_doi,
     first_surname,

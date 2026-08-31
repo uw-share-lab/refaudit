@@ -5,9 +5,9 @@ import time
 
 import pytest
 
-from refcheck.cache import SCHEMA_VERSION, Cache
-from refcheck.ratelimit import CircuitBreaker, TokenBucket
-from refcheck.xmlsafe import XmlSecurityError, fromstring
+from refaudit.cache import SCHEMA_VERSION, Cache
+from refaudit.ratelimit import CircuitBreaker, TokenBucket
+from refaudit.xmlsafe import XmlSecurityError, fromstring
 
 
 # --- token bucket ----------------------------------------------------------
@@ -116,7 +116,7 @@ def test_legitimate_atom_still_parses():
 # --- http client policy ----------------------------------------------------
 
 def test_http_client_refuses_plain_http():
-    from refcheck.http import HttpClient, TransportError
+    from refaudit.http import HttpClient, TransportError
 
     client = HttpClient(user_agent="test", bucket=TokenBucket(100.0, 10))
     with pytest.raises(TransportError, match="non-https"):
@@ -124,19 +124,19 @@ def test_http_client_refuses_plain_http():
 
 
 def test_api_key_is_sent_as_header_not_query(monkeypatch):
-    from refcheck.resolvers.crossref import CrossrefDoi
+    from refaudit.resolvers.crossref import CrossrefDoi
 
     class KeyedResolver(CrossrefDoi):
-        api_key_env = "REFCHECK_TEST_KEY"
+        api_key_env = "REFAUDIT_TEST_KEY"
         api_key_header = "X-Api-Key"
 
-    monkeypatch.setenv("REFCHECK_TEST_KEY", "s3cret")
+    monkeypatch.setenv("REFAUDIT_TEST_KEY", "s3cret")
     r = KeyedResolver(contact_email="a@b.org")
     assert r.http._api_key_header == ("X-Api-Key", "s3cret")
 
 
 def test_contact_email_is_required():
-    from refcheck.resolvers.crossref import CrossrefDoi
+    from refaudit.resolvers.crossref import CrossrefDoi
 
     with pytest.raises(ValueError, match="contact_email"):
         CrossrefDoi(contact_email="")
