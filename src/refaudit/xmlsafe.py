@@ -24,7 +24,7 @@ from __future__ import annotations
 import re as _re
 import xml.etree.ElementTree as _ET
 
-__all__ = ["fromstring", "ParseError", "XmlSecurityError"]
+__all__ = ["ParseError", "XmlSecurityError", "fromstring"]
 
 ParseError = _ET.ParseError
 
@@ -34,8 +34,8 @@ class XmlSecurityError(Exception):
 
 
 try:  # pragma: no cover - exercised only where defusedxml is installed
-    from defusedxml.ElementTree import fromstring as _defused_fromstring
     from defusedxml.common import DefusedXmlException
+    from defusedxml.ElementTree import fromstring as _defused_fromstring
 
     def fromstring(text: str):
         # Normalise defusedxml's exception family onto our own, so callers have

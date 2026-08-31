@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass, field
-from typing import Optional
 
 
 @dataclass(frozen=True)
@@ -39,7 +38,7 @@ class Entry:
         return self.get("eprint") or self.get("archiveprefix_id")
 
     @property
-    def year(self) -> Optional[int]:
+    def year(self) -> int | None:
         import re
 
         m = re.search(r"\d{4}", self.get("year"))
@@ -52,7 +51,7 @@ class Record:
 
     source: str
     title: str
-    year: Optional[int] = None
+    year: int | None = None
     first_author_surname: str = ""
     doi: str = ""
     url: str = ""
@@ -82,7 +81,7 @@ class Unavailable:
 
     source: str
     reason: str = ""
-    retry_after: Optional[float] = None
+    retry_after: float | None = None
 
 
 Outcome = Found | NotFound | Unavailable
@@ -119,9 +118,9 @@ class CheckResult:
     entry_title: str = ""
     found_title: str = ""
     source: str = ""
-    similarity: Optional[float] = None
+    similarity: float | None = None
     note: str = ""
-    cited: Optional[bool] = None
+    cited: bool | None = None
 
     def as_row(self) -> dict[str, object]:
         return {

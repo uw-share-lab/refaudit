@@ -27,8 +27,9 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, Mapping, Optional
+from typing import Any
 
 from .ratelimit import CircuitBreaker, TokenBucket
 
@@ -38,7 +39,7 @@ MAX_REDIRECTS = 3
 
 
 class HttpError(Exception):
-    def __init__(self, status: int, message: str, retry_after: Optional[float] = None):
+    def __init__(self, status: int, message: str, retry_after: float | None = None):
         super().__init__(f"HTTP {status}: {message}")
         self.status = status
         self.retry_after = retry_after
@@ -64,11 +65,11 @@ class Response:
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     """Handle redirects ourselves so we can enforce https and a hop limit."""
 
-    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
 
 
-def _parse_retry_after(value: Optional[str]) -> Optional[float]:
+def _parse_retry_after(value: str | None) -> float | None:
     if not value:
         return None
     value = value.strip()
@@ -80,7 +81,9 @@ def _parse_retry_after(value: Optional[str]) -> Optional[float]:
         dt = parsedate_to_datetime(value)
         delta = dt.timestamp() - time.time()
         return max(delta, 0.0)
-    except Exception:
+    except (TypeError, ValueError, OverflowError):
+        # A malformed Retry-After is the server's problem, not ours; fall back
+        # to our own backoff rather than failing the request.
         return None
 
 
@@ -92,10 +95,10 @@ class HttpClient:
         *,
         user_agent: str,
         bucket: TokenBucket,
-        breaker: Optional[CircuitBreaker] = None,
+        breaker: CircuitBreaker | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         max_attempts: int = 4,
-        api_key_header: Optional[tuple[str, str]] = None,
+        api_key_header: tuple[str, str] | None = None,
     ) -> None:
         self.user_agent = user_agent
         self.bucket = bucket
@@ -126,10 +129,12 @@ class HttpClient:
             body = b""
             try:
                 body = e.read(4096)
-            except Exception:
-                pass
+            except (OSError, ValueError):
+                # The error body is only used to make the message readable;
+                # losing it must not mask the HTTP status we actually care about.
+                body = b""
             if e.code in (301, 302, 303, 307, 308):
-                loc = (e.headers or {}).get("Location", "")
+                loc = e.headers.get("Location", "") if e.headers else ""
                 raise HttpError(e.code, f"redirect to {loc[:120]}")
             raise HttpError(e.code, body.decode("utf-8", "replace")[:200] or e.reason,
                             retry_after)

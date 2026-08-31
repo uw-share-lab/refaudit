@@ -18,7 +18,7 @@ import os
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 SCHEMA_VERSION = 2
 
@@ -42,7 +42,7 @@ class Cache:
             return
         self._data = blob.get("entries", {})
 
-    def get(self, key: str) -> Optional[dict[str, Any]]:
+    def get(self, key: str) -> dict[str, Any] | None:
         item = self._data.get(key)
         if not item:
             return None
@@ -78,7 +78,8 @@ class Cache:
                 except OSError:
                     pass
 
-    def __enter__(self) -> "Cache":
+    # PYI034 prefers Self, which is 3.11+; this package supports 3.10.
+    def __enter__(self) -> Cache:  # noqa: PYI034
         return self
 
     def __exit__(self, *exc: object) -> None:

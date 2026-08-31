@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from typing import Optional, Protocol, runtime_checkable
+from typing import Protocol, runtime_checkable
 
 from ..http import HttpClient
 from ..models import Entry, Outcome
@@ -48,8 +48,8 @@ class HttpResolver:
 
     name: str = "base"
     rate: RateSpec = RateSpec(1.0, 1.0, "default")
-    api_key_env: Optional[str] = None
-    api_key_header: Optional[str] = None
+    api_key_env: str | None = None
+    api_key_header: str | None = None
 
     def __init__(self, *, contact_email: str, timeout: float = 20.0) -> None:
         if not contact_email:

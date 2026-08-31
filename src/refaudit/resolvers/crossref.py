@@ -12,7 +12,7 @@ below is only the starting pace.
 from __future__ import annotations
 
 import urllib.parse
-from typing import Any, Optional
+from typing import Any
 
 from ..http import HttpError, TransportError
 from ..models import Entry, Found, NotFound, Outcome, Record, Unavailable
@@ -22,7 +22,7 @@ from .base import HttpResolver, RateSpec
 API = "https://api.crossref.org"
 
 
-def _year(msg: dict[str, Any]) -> Optional[int]:
+def _year(msg: dict[str, Any]) -> int | None:
     for field in ("issued", "published-print", "published-online", "created"):
         parts = (msg.get(field) or {}).get("date-parts") or []
         if parts and parts[0] and parts[0][0]:

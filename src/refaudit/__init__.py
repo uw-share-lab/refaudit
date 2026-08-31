@@ -20,7 +20,20 @@ from .resolvers import default_resolvers
 __version__ = "0.1.0"
 
 __all__ = [
-    "Cache", "CheckResult", "Checker", "Entry", "Found", "NotFound", "Record",
-    "Thresholds", "Unavailable", "Verdict", "cited_keys", "default_resolvers",
-    "find_tex", "parse_file", "parse_string", "__version__",
+    "Cache",
+    "CheckResult",
+    "Checker",
+    "Entry",
+    "Found",
+    "NotFound",
+    "Record",
+    "Thresholds",
+    "Unavailable",
+    "Verdict",
+    "__version__",
+    "cited_keys",
+    "default_resolvers",
+    "find_tex",
+    "parse_file",
+    "parse_string",
 ]

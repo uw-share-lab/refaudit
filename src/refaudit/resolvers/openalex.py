@@ -14,7 +14,7 @@ submission deadline, not something that needs to finish in seconds.
 from __future__ import annotations
 
 import urllib.parse
-from typing import Any, Optional
+from typing import Any
 
 from ..http import HttpError, TransportError
 from ..models import Entry, Found, NotFound, Outcome, Record, Unavailable
@@ -32,7 +32,7 @@ def _record(work: dict[str, Any]) -> Record:
         if name:
             surname = name.split()[-1]
     doi = (work.get("doi") or "").replace("https://doi.org/", "").lower()
-    year: Optional[int] = work.get("publication_year")
+    year: int | None = work.get("publication_year")
     return Record(
         source="openalex",
         title=(work.get("display_name") or work.get("title") or "").strip(),
@@ -59,7 +59,7 @@ class OpenAlex(HttpResolver):
     def can_handle(self, entry: Entry) -> bool:
         return bool(clean_doi(entry.doi) or clean_arxiv_id(entry.arxiv_id) or entry.title.strip())
 
-    def _get_json(self, url: str) -> tuple[Optional[dict[str, Any]], Optional[Outcome]]:
+    def _get_json(self, url: str) -> tuple[dict[str, Any] | None, Outcome | None]:
         try:
             return self.http.get(url).json(), None
         except HttpError as e:

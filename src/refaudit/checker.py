@@ -16,8 +16,8 @@ that Crossref happens not to index.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from typing import Iterable, Optional, Sequence
 
 from .bibtex import NON_ARCHIVAL_TYPES
 from .cache import Cache
@@ -41,13 +41,16 @@ class Thresholds:
     year_slack: int = 1            # preprint/publication years legitimately differ by one
 
 
+DEFAULT_THRESHOLDS = Thresholds()
+
+
 class Checker:
     def __init__(
         self,
         resolvers: Sequence[Resolver],
         *,
-        cache: Optional[Cache] = None,
-        thresholds: Thresholds = Thresholds(),
+        cache: Cache | None = None,
+        thresholds: Thresholds = DEFAULT_THRESHOLDS,
     ) -> None:
         if not resolvers:
             raise ValueError("at least one resolver is required")
@@ -57,7 +60,7 @@ class Checker:
 
     # -- public ------------------------------------------------------------
 
-    def check(self, entry: Entry, *, cited: Optional[bool] = None) -> CheckResult:
+    def check(self, entry: Entry, *, cited: bool | None = None) -> CheckResult:
         cached = self.cache.get(self._cache_key(entry)) if self.cache else None
         if cached:
             return CheckResult(
@@ -87,7 +90,7 @@ class Checker:
             )
         return result
 
-    def check_all(self, entries: Iterable[Entry], cited: Optional[set[str]] = None):
+    def check_all(self, entries: Iterable[Entry], cited: set[str] | None = None):
         for entry in entries:
             yield self.check(entry, cited=(entry.key in cited) if cited is not None else None)
 
@@ -104,7 +107,7 @@ class Checker:
             str(entry.year or ""),
         ])
 
-    def _check_uncached(self, entry: Entry, cited: Optional[bool]) -> CheckResult:
+    def _check_uncached(self, entry: Entry, cited: bool | None) -> CheckResult:
         applicable = [r for r in self.resolvers if r.can_handle(entry)]
 
         has_identifier = bool(clean_doi(entry.doi) or clean_arxiv_id(entry.arxiv_id))
@@ -154,47 +157,49 @@ class Checker:
         record: Record,
         resolver: Resolver,
         has_identifier: bool,
-        cited: Optional[bool],
+        cited: bool | None,
     ) -> CheckResult:
         score = similarity(entry.title, record.title)
-        base = dict(
-            key=entry.key,
-            entry_title=entry.title,
-            found_title=record.title,
-            source=resolver.name,
-            similarity=score,
-            cited=cited,
-        )
+
+        def result(verdict: Verdict, note: str = "") -> CheckResult:
+            # Built explicitly rather than by unpacking a dict: the shared
+            # fields are identical for every branch, but keyword unpacking
+            # erases their types and hides genuine mistakes from the checker.
+            return CheckResult(
+                key=entry.key,
+                verdict=verdict,
+                entry_title=entry.title,
+                found_title=record.title,
+                source=resolver.name,
+                similarity=score,
+                note=note,
+                cited=cited,
+            )
 
         if score < self.thresholds.title_match:
             resolved_by_identifier = resolver.name.endswith(":doi") or "arxiv" in resolver.name
-            if resolved_by_identifier or score < self.thresholds.title_suspect:
-                # Either the identifier points at a different paper (serious), or
-                # the search result is so far off that it is not this work.
-                if resolved_by_identifier:
-                    return CheckResult(verdict=Verdict.TITLE_MISMATCH,
-                                       note="identifier resolves to a different title", **base)
-                # A dataset or web resource with no identifier was never going to
-                # be found in a citation index; a stray title hit is not a finding
-                # about the entry, so say we skipped it rather than cry wolf.
+            if resolved_by_identifier:
+                # The identifier points at a different paper. This is the
+                # signature of a fabricated or mis-copied citation.
+                return result(Verdict.TITLE_MISMATCH,
+                              "identifier resolves to a different title")
+            if score < self.thresholds.title_suspect:
+                # A dataset or web resource with no identifier was never going
+                # to be in a citation index; a stray title hit is not a finding.
                 if entry.entry_type in NON_ARCHIVAL_TYPES and not has_identifier:
-                    return CheckResult(verdict=Verdict.SKIPPED,
-                                       note=f"@{entry.entry_type} with no identifier; not indexed",
-                                       **base)
-                return CheckResult(verdict=Verdict.NOT_FOUND,
-                                   note="no close title match found", **base)
-            return CheckResult(verdict=Verdict.UNVERIFIED,
-                               note="only a weak title match; no identifier to confirm", **base)
+                    return result(Verdict.SKIPPED,
+                                  f"@{entry.entry_type} with no identifier; not indexed")
+                return result(Verdict.NOT_FOUND, "no close title match found")
+            return result(Verdict.UNVERIFIED,
+                          "only a weak title match; no identifier to confirm")
 
         want = first_surname(entry.get("author"))
-        if want and record.first_author_surname:
-            if not surnames_match(want, first_surname(record.first_author_surname)):
-                return CheckResult(verdict=Verdict.AUTHOR_MISMATCH,
-                                   note=f"bib={want} vs {record.first_author_surname.lower()}",
-                                   **base)
+        if (want and record.first_author_surname
+                and not surnames_match(want, first_surname(record.first_author_surname))):
+            return result(Verdict.AUTHOR_MISMATCH,
+                          f"bib={want} vs {record.first_author_surname.lower()}")
 
         if entry.year and record.year and abs(entry.year - record.year) > self.thresholds.year_slack:
-            return CheckResult(verdict=Verdict.YEAR_MISMATCH,
-                               note=f"bib={entry.year} vs {record.year}", **base)
+            return result(Verdict.YEAR_MISMATCH, f"bib={entry.year} vs {record.year}")
 
-        return CheckResult(verdict=Verdict.OK, note="", **base)
+        return result(Verdict.OK)

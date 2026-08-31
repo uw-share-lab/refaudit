@@ -13,9 +13,15 @@ from .crossref import CrossrefDoi, CrossrefTitle
 from .openalex import OpenAlex
 
 __all__ = [
-    "ArxivId", "CrossrefDoi", "CrossrefTitle", "OpenAlex",
-    "HttpResolver", "RateSpec", "Resolver",
-    "default_resolvers", "AVAILABLE",
+    "AVAILABLE",
+    "ArxivId",
+    "CrossrefDoi",
+    "CrossrefTitle",
+    "HttpResolver",
+    "OpenAlex",
+    "RateSpec",
+    "Resolver",
+    "default_resolvers",
 ]
 
 AVAILABLE = {

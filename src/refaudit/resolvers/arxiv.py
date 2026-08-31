@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import re
 import urllib.parse
-from typing import Optional
 
 from ..http import HttpError, TransportError
 from ..models import Entry, Found, NotFound, Outcome, Record, Unavailable
@@ -69,7 +68,7 @@ class ArxivId(HttpResolver):
             return NotFound(self.name, "no such arXiv id")
 
         published = (node.findtext(f"{_ATOM}published") or "")[:4]
-        year: Optional[int] = int(published) if published.isdigit() else None
+        year: int | None = int(published) if published.isdigit() else None
 
         surname = ""
         author = node.find(f"{_ATOM}author")

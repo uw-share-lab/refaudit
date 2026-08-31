@@ -9,7 +9,6 @@ from refaudit.cache import SCHEMA_VERSION, Cache
 from refaudit.ratelimit import CircuitBreaker, TokenBucket
 from refaudit.xmlsafe import XmlSecurityError, fromstring
 
-
 # --- token bucket ----------------------------------------------------------
 
 def test_bucket_allows_burst_then_paces():

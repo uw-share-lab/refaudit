@@ -21,7 +21,7 @@ _WS = re.compile(r"\s+")
 
 # Words that carry no discriminating power in a title comparison.
 _STOPWORDS = frozenset(
-    "a an the of for and or in on at to with without via using toward towards".split()
+    ["a", "an", "the", "of", "for", "and", "or", "in", "on", "at", "to", "with", "without", "via", "using", "toward", "towards"]
 )
 
 
@@ -104,7 +104,7 @@ def surnames_match(a: str, b: str) -> bool:
     return difflib.SequenceMatcher(None, a, b).ratio() >= 0.85
 
 
-_DOI_RE = re.compile(r"^10\.\d{4,9}/[-._;()/:a-z0-9<>\[\]+]+$", re.I)
+_DOI_RE = re.compile(r"^10\.\d{4,9}/[-._;()/:a-z0-9<>\[\]+]+$", re.IGNORECASE)
 
 
 def clean_doi(raw: str) -> str:
@@ -116,13 +116,13 @@ def clean_doi(raw: str) -> str:
     if not raw:
         return ""
     value = strip_tex(raw).strip()
-    value = re.sub(r"^\s*(doi:\s*)?", "", value, flags=re.I)
-    value = re.sub(r"^https?://(dx\.)?doi\.org/", "", value, flags=re.I)
+    value = re.sub(r"^\s*(doi:\s*)?", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"^https?://(dx\.)?doi\.org/", "", value, flags=re.IGNORECASE)
     value = value.strip().rstrip(".,;")
     return value if _DOI_RE.match(value) else ""
 
 
-_ARXIV_RE = re.compile(r"^(\d{4}\.\d{4,5}|[a-z-]+(\.[A-Z]{2})?/\d{7})$", re.I)
+_ARXIV_RE = re.compile(r"^(\d{4}\.\d{4,5}|[a-z-]+(\.[A-Z]{2})?/\d{7})$", re.IGNORECASE)
 
 
 def clean_arxiv_id(raw: str) -> str:
@@ -130,7 +130,7 @@ def clean_arxiv_id(raw: str) -> str:
     if not raw:
         return ""
     value = strip_tex(raw).strip()
-    value = re.sub(r"^arxiv:\s*", "", value, flags=re.I)
-    value = re.sub(r"^https?://arxiv\.org/abs/", "", value, flags=re.I)
+    value = re.sub(r"^arxiv:\s*", "", value, flags=re.IGNORECASE)
+    value = re.sub(r"^https?://arxiv\.org/abs/", "", value, flags=re.IGNORECASE)
     value = re.sub(r"v\d+$", "", value.strip())
     return value if _ARXIV_RE.match(value) else ""
