@@ -1,10 +1,23 @@
 """Resolver registry.
 
-Order matters: identifier-based resolvers run before title search, so a strong
-signal is used when one exists and a weak one only when nothing better is
-available. DOI lookups are spread across registration agencies -- Crossref for
-most published literature, DataCite for preprints and deposits -- because
-neither one alone can speak for the whole DOI system.
+Order matters, and encodes how much each source's answer is worth.
+
+1. **Identifier lookups first.** A DOI or arXiv ID is a claim the author made
+   that we can check exactly; a title search is a guess we then have to score.
+2. **Across registration agencies, not just one.** No agency speaks for the
+   whole DOI system -- Crossref registers most published literature, DataCite
+   registers preprints and deposits (every ``10.48550/*`` arXiv DOI, Zenodo,
+   figshare) -- and ``doi:content`` negotiates with whichever agency owns the
+   DOI, covering the ones we do not query directly. Reading one agency's 404 as
+   "this DOI does not exist" once reported 22 live preprints as dead.
+3. **Curated title indexes before harvested ones.** DBLP is hand-curated for
+   computer science and unmetered; OpenAlex is broader but noisier, and now
+   meters usage, so it is a fallback rather than the backbone.
+4. **Books last and only for books**, because no article index will ever hold a
+   monograph, and Open Library would be noise for anything else.
+
+No source is load-bearing on its own: every one of them can be unreachable
+without the run producing a false finding.
 """
 
 from __future__ import annotations
@@ -13,7 +26,10 @@ from .arxiv import ArxivId
 from .base import HttpResolver, RateSpec, Resolver
 from .crossref import CrossrefDoi, CrossrefTitle
 from .datacite import DataCiteDoi
+from .dblp import Dblp
+from .doi_content import DoiContentNegotiation
 from .openalex import OpenAlex
+from .openlibrary import OpenLibrary
 
 __all__ = [
     "AVAILABLE",
@@ -21,19 +37,28 @@ __all__ = [
     "CrossrefDoi",
     "CrossrefTitle",
     "DataCiteDoi",
+    "Dblp",
+    "DoiContentNegotiation",
     "HttpResolver",
     "OpenAlex",
+    "OpenLibrary",
     "RateSpec",
     "Resolver",
     "default_resolvers",
 ]
 
 AVAILABLE = {
+    # identifier lookups, strongest evidence first
     "crossref:doi": CrossrefDoi,
     "datacite:doi": DataCiteDoi,
+    "doi:content": DoiContentNegotiation,
     "arxiv:id": ArxivId,
+    # title searches, curated before harvested
+    "dblp": Dblp,
     "openalex": OpenAlex,
     "crossref:title": CrossrefTitle,
+    # only ever sees monographs
+    "openlibrary": OpenLibrary,
 }
 
 

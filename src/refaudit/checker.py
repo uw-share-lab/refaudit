@@ -7,16 +7,26 @@ that applies to an entry came back ``Unavailable``, the result is ``UNVERIFIED``
 and the report says so separately from real findings. This is what stops the
 tool crying wolf when a service is rate-limiting the network.
 
-**Identifier evidence outranks title evidence.** A DOI that Crossref says does
-not exist is a finding. A title search that returns something different is only
-a finding if we had no identifier to go on -- otherwise it is just a weak search
-result, and treating it as a mismatch would flag every arXiv-only workshop paper
-that Crossref happens not to index.
+**Identifier evidence outranks title evidence.** An identifier that resolves to
+a different paper is a finding, and no later source can overturn it -- that
+disagreement is the signature of a mis-copied citation. A title search returning
+something different is only a finding when there was no identifier to go on;
+otherwise it is just a weak search result, and treating it as a mismatch would
+flag every arXiv-only workshop paper Crossref happens not to index.
+
+**No single source is load-bearing.** Sources are tried in order of how much
+their answer is worth, and any of them can be missing or unreachable without the
+run producing a false finding. A DOI is checked against several registration
+agencies, because none of them speaks for the whole DOI system: reading
+Crossref's 404 as "this DOI does not exist" once reported 22 live preprints as
+dead references. A weak title hit does not end the search either, or the first
+index to return anything at all would mask a better answer from the next.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from .bibtex import NON_ARCHIVAL_TYPES
@@ -43,6 +53,17 @@ class Thresholds:
 
 
 DEFAULT_THRESHOLDS = Thresholds()
+
+
+def _is_identifier_lookup(resolver: Resolver) -> bool:
+    """Did this resolver answer a DOI or arXiv ID rather than a title guess?
+
+    The distinction decides whether a disagreement is a finding: an identifier
+    pointing at another paper is the signature of a mis-copied citation, while
+    a title search returning something else is usually just a poor search.
+    """
+    name = resolver.name
+    return name.endswith(":doi") or "arxiv" in name
 
 
 class Checker:
@@ -95,9 +116,27 @@ class Checker:
             )
         return result
 
-    def check_all(self, entries: Iterable[Entry], cited: set[str] | None = None):
-        for entry in entries:
-            yield self.check(entry, cited=(entry.key in cited) if cited is not None else None)
+    def check_all(self, entries: Iterable[Entry], cited: set[str] | None = None,
+                  workers: int = 1):
+        """Yield a result per entry, in input order.
+
+        ``workers`` overlaps *entries*, never the sources within one entry: an
+        entry stops at its first hit, so firing every source at once would cost
+        third parties requests we then throw away. Politeness does not depend on
+        this number -- each service has its own token bucket, shared by all
+        threads -- so raising it recovers time lost to network latency without
+        ever exceeding the rate a service documents.
+        """
+        entries = list(entries)
+        was_cited = (lambda e: (e.key in cited) if cited is not None else None)
+        if workers <= 1 or len(entries) < 2:
+            for entry in entries:
+                yield self.check(entry, cited=was_cited(entry))
+            return
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            # map preserves input order, so a run is reproducible and the
+            # progress line still matches the file.
+            yield from pool.map(lambda e: self.check(e, cited=was_cited(e)), entries)
 
     # -- internals ---------------------------------------------------------
 
@@ -126,6 +165,7 @@ class Checker:
         any_unavailable: list[str] = []
         authoritative_absence: list[str] = []
         doi_disowned_by: list[str] = []
+        best_guess: tuple[float, Record, Resolver] | None = None
 
         for resolver in applicable:
             outcome = resolver.resolve(entry)
@@ -144,7 +184,29 @@ class Checker:
                 continue
 
             if isinstance(outcome, Found):
-                return self._judge(entry, outcome.record, resolver, has_identifier, cited)
+                # An identifier lookup is authoritative either way: if it
+                # resolves to a different paper, that disagreement *is* the
+                # finding, and no later source can overturn it.
+                if _is_identifier_lookup(resolver):
+                    return self._judge(entry, outcome.record, resolver,
+                                       has_identifier, cited)
+                # A title search is a guess. A convincing one ends the search;
+                # a poor one must not, or the first index to return anything at
+                # all would mask a better answer from the next -- which is how
+                # a real book stayed "not found" behind an empty Crossref hit.
+                score = similarity(entry.title, outcome.record.title)
+                if score >= self.thresholds.title_match:
+                    return self._judge(entry, outcome.record, resolver,
+                                       has_identifier, cited)
+                if best_guess is None or score > best_guess[0]:
+                    best_guess = (score, outcome.record, resolver)
+                continue
+
+        # Every title search was unconvincing; report the closest so the note
+        # says what was actually seen rather than a bare "not found".
+        if best_guess is not None and not doi_disowned_by:
+            _, record, resolver = best_guess
+            return self._judge(entry, record, resolver, has_identifier, cited)
 
         # Nothing resolved the entry. If a DOI was disowned by every agency we
         # asked, ask the DOI proxy -- which answers for all of them -- before
@@ -206,8 +268,7 @@ class Checker:
             )
 
         if score < self.thresholds.title_match:
-            resolved_by_identifier = resolver.name.endswith(":doi") or "arxiv" in resolver.name
-            if resolved_by_identifier:
+            if _is_identifier_lookup(resolver):
                 # The identifier points at a different paper. This is the
                 # signature of a fabricated or mis-copied citation.
                 return result(Verdict.TITLE_MISMATCH,
@@ -228,7 +289,9 @@ class Checker:
             return result(Verdict.AUTHOR_MISMATCH,
                           f"bib={want} vs {record.first_author_surname.lower()}")
 
-        if entry.year and record.year and abs(entry.year - record.year) > self.thresholds.year_slack:
+        year_counts = getattr(resolver, "year_is_authoritative", True)
+        if (year_counts and entry.year and record.year
+                and abs(entry.year - record.year) > self.thresholds.year_slack):
             return result(Verdict.YEAR_MISMATCH, f"bib={entry.year} vs {record.year}")
 
         return result(Verdict.OK)
