@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.4.4
+
+No behaviour change. More of the coverage 0.4.3 started, on the two places it
+did not reach.
+
+### Added
+
+- **The socket-facing half of the HTTP client is tested.** `_open_once` was the
+  least-covered code in `http.py` at 71%: the response size cap, the gzip path,
+  and the classification of urllib's exception family. Every other test in the
+  suite stubs `_open_once` itself, so none of it ran.
+
+  That classification is the one the whole tool rests on. An `HttpError` can
+  become a statement about a reference; a `TransportError` never can, because a
+  resolver turns it into `Unavailable`. Getting it wrong is how a network
+  problem becomes an accusation. Both directions are now pinned, along with the
+  size cap at and over the limit, gzip, `Retry-After` in both its numeric and
+  HTTP-date forms, the rate-limit headers Crossref publishes, https-only
+  enforcement, and an API key going in a header rather than a URL. `http.py`
+  is now at 99%.
+
+- **Both XML backends are held to the same promise.** `xmlsafe` uses
+  `defusedxml` when installed and a hardened standard-library parser otherwise.
+  Only one runs on a given machine, so the suite silently exercised whichever
+  the developer happened to have -- and since `defusedxml` is an *optional*
+  extra and the dependency list is empty by design, the untested one was the
+  path most installations actually take. The same entity attacks now go through
+  both.
+
+Coverage 89% to 92% overall, `http.py` 71% to 99%.
+
+### Notes
+
+- `xmlsafe.py` still reports 63%. Nine of its ten uncovered statements are the
+  expat entity-handler block, which cannot execute on any supported Python:
+  `xml.etree.ElementTree.XMLParser` no longer exposes a `.parser` attribute, so
+  the `if expat is not None` guard is always false. The comment beside it
+  already records that those handlers "were silently not applied" and that the
+  DTD scan is "the check that actually holds", which the new tests confirm --
+  every attack is refused by the scan, on both backends. The block is dead
+  rather than untested and is left in place for now rather than removed as a
+  side effect of a test release.
+- The tenth is the `except ImportError` line, which the new tests do execute;
+  coverage cannot attribute it because reaching that branch requires
+  re-importing the module.
+
+
 ## 0.4.3
 
 No behaviour change. This is the test coverage that should have existed before
