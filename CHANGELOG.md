@@ -1,5 +1,64 @@
 # Changelog
 
+## 0.4.3
+
+No behaviour change. This is the test coverage that should have existed before
+any of 0.4.x was written, plus the packaging metadata and two documentation
+claims that had quietly stopped being true.
+
+### Added
+
+- **Every resolver is now tested against bytes the real service sent.** The
+  response parsers were the least-covered code in the package, between 27% and
+  66%, which is the wrong place to be thin: they are the part most exposed to
+  somebody else changing their response shape, and a misparse there does not
+  crash, it produces a confident wrong answer about a bibliography.
+
+  `tests/fixtures/responses/` holds captures from Crossref, DataCite, arXiv,
+  DBLP, Open Library and the DOI proxy. Nothing is hand-written, and the
+  expected values were read out of the raw fixtures independently of refaudit's
+  own parsing. Two of the captures are failures, kept on purpose: DBLP answered
+  503 with an HTML body and OpenAlex answered with a rate-limit JSON object,
+  and both are shapes a parser can mistake for data.
+
+  Every title-search fixture happens to have the *wrong* paper as its first
+  hit, which is what these APIs really return. That is now documented by tests:
+  a resolver parses its candidate faithfully and the checker decides whether it
+  is the same work.
+
+- **The command line is tested end to end.** `main()` was at 22%, an odd place
+  to be thin given it is the only part every user touches. Exit status is the
+  contract a pre-submission hook keys off, so all three cases are now covered,
+  along with argument validation, `--only-cited`, `--quiet`, `-v`, the report
+  files, and duplicates being enough on their own to warrant a look.
+
+- **`DoiExistence` is tested for all three of its states.** It decides between
+  `DEAD_DOI` and `UNVERIFIED`, so returning "not registered" when the honest
+  answer is "could not tell" is the failure that puts a false accusation in
+  somebody's report. Every non-404 status and every unrecognised response code
+  is now pinned to "could not tell".
+
+Coverage went from 69% to 89%; `cli.py` from 22% to 98%.
+
+### Fixed
+
+- **The README described OpenAlex's limits as they no longer are.** It cited a
+  documented ceiling of 10 req/s and 100k/day. A live run was refused with
+  `Retry-After: 29895` and a body explaining that the request cost $0.001
+  against a remaining balance of $0.0003, resetting at midnight UTC. OpenAlex
+  meters against a daily budget rather than a request ceiling, and a free
+  caller exhausts it quickly, so the README and the resolver's own rationale
+  now say that.
+
+- **Three GitHub Pages actions in `docs.yml` were behind**, missed when the
+  other workflows were brought forward in 0.4.2: `configure-pages` v5 to v6,
+  `upload-pages-artifact` v3 to v5, `deploy-pages` v4 to v5.
+
+- **PyPI classifiers were three lines long.** Added the supported Python
+  versions, the licence, development status, operating system and `Typing ::
+  Typed`, so the package can be filtered for on PyPI.
+
+
 ## 0.4.2
 
 ### Added

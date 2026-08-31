@@ -51,8 +51,10 @@ class OpenAlex(HttpResolver):
     rate = RateSpec(
         per_second=3.0,
         burst=3.0,
-        rationale="OpenAlex documents 10 req/s and 100k/day for the polite pool; "
-                  "we use a third of the rate ceiling for a background job.",
+        rationale="OpenAlex meters against a daily budget rather than a request "
+                  "ceiling -- a free caller is refused with a Retry-After of "
+                  "hours once it is spent, which is why this is a fallback and "
+                  "never the backbone.",
     )
 
     _SELECT = "id,doi,display_name,title,publication_year,authorships"

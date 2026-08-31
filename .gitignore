@@ -10,3 +10,6 @@ build/
 .ruff_cache/
 refaudit-out/
 .DS_Store
+.coverage
+coverage.xml
+htmlcov/
