@@ -13,7 +13,6 @@ from .bibtex import cited_keys, find_tex, parse_file
 from .cache import Cache
 from .checker import Checker, Thresholds
 from .doi_registry import DoiExistence
-from .duplicates import Duplicate, find_duplicates
 from .models import Verdict
 from .resolvers import AVAILABLE, default_resolvers
 
@@ -55,13 +54,6 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--timeout", type=float, default=20.0, help="per-request timeout seconds")
     p.add_argument("--title-match", type=float, default=Thresholds.title_match,
                    help="similarity at or above which two titles are the same work")
-    p.add_argument("--workers", type=int, default=4,
-                   help="entries checked in parallel (default: 4). Each service "
-                        "keeps its own rate limit regardless, so this recovers "
-                        "time lost to latency rather than going faster than a "
-                        "service allows")
-    p.add_argument("--no-duplicates", action="store_true",
-                   help="skip the offline duplicate-entry pass")
     p.add_argument("--quiet", action="store_true", help="only print the summary")
     p.add_argument("--version", action="version", version=f"refaudit {__version__}")
     return p
@@ -114,9 +106,7 @@ def main(argv: list[str] | None = None) -> int:
 
     results = []
     try:
-        for i, result in enumerate(
-                checker.check_all(entries, cited=cited,
-                                  workers=max(1, args.workers)), 1):
+        for i, result in enumerate(checker.check_all(entries, cited=cited), 1):
             results.append(result)
             if not args.quiet:
                 print(f"[{i}/{len(entries)}] {result.verdict.value:<15} {result.key}", flush=True)
@@ -128,26 +118,16 @@ def main(argv: list[str] | None = None) -> int:
         if cache:
             cache.flush()
 
-    # Offline, so it still runs when every network source refused us -- and it
-    # is checked against the entries actually selected, not the whole file.
-    duplicates = [] if args.no_duplicates else find_duplicates(entries)
-
-    return _report(results, args.out, bool(args.only_cited), duplicates)
+    return _report(results, args.out, bool(args.only_cited))
 
 
-def _report(results, out: Path, only_cited: bool,
-            duplicates: list[Duplicate] | None = None) -> int:
+def _report(results, out: Path, only_cited: bool) -> int:
     order = list(Verdict)
     results.sort(key=lambda r: (order.index(r.verdict), r.key.lower()))
 
-    duplicates = duplicates or []
-    # A key is annotated with the entry it duplicates, so the CSV carries the
-    # finding too rather than it living only in the text report.
-    dup_of = {k: d.primary for d in duplicates for k in d.keys if k != d.primary}
-
     csv_path = out / "reference_check.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as fh:
-        rows = [{**r.as_row(), "duplicate_of": dup_of.get(r.key, "")} for r in results]
+        rows = [r.as_row() for r in results]
         writer = csv.DictWriter(fh, fieldnames=list(rows[0].keys()))
         writer.writeheader()
         writer.writerows(rows)
@@ -167,16 +147,6 @@ def _report(results, out: Path, only_cited: bool,
         lines += [f"{len(unverified)} entries could not be checked (a source was unreachable).",
                   "These are not findings. Re-run later or from another network.", ""]
 
-    if duplicates:
-        n = sum(len(d.keys) - 1 for d in duplicates)
-        lines.append(f"--- {len(duplicates)} work(s) cited more than once "
-                     f"({n} redundant entr{'y' if n == 1 else 'ies'})")
-        for d in duplicates:
-            lines.append(f"  {d.reason:<22} {d.detail[:60]}")
-            for k in d.keys:
-                lines.append(f"      {'keep  ' if k == d.primary else 'remove'} {k}")
-        lines.append("")
-
     if findings:
         lines.append(f"--- {len(findings)} entries need a human look, worst first")
         for r in findings:
@@ -193,7 +163,7 @@ def _report(results, out: Path, only_cited: bool,
     (out / "reference_check.txt").write_text(text + "\n", encoding="utf-8")
     print("\n" + text)
     print(f"\nwritten to {out}/")
-    return 1 if (findings or duplicates) else 0
+    return 1 if findings else 0
 
 
 if __name__ == "__main__":  # pragma: no cover

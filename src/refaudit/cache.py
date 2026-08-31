@@ -16,7 +16,6 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -30,10 +29,6 @@ class Cache:
         self.ttl = ttl_days * 86400.0
         self._data: dict[str, dict[str, Any]] = {}
         self._dirty = False
-        # Checking runs across threads, and get() both reads and evicts, so the
-        # dict needs guarding rather than relying on which operations happen to
-        # be atomic today.
-        self._lock = threading.RLock()
         self._load()
 
     def _load(self) -> None:
@@ -48,33 +43,26 @@ class Cache:
         self._data = blob.get("entries", {})
 
     def get(self, key: str) -> dict[str, Any] | None:
-        with self._lock:
-            item = self._data.get(key)
-            if not item:
-                return None
-            if self.ttl and time.time() - item.get("stored_at", 0) > self.ttl:
-                self._data.pop(key, None)
-                self._dirty = True
-                return None
-            return item.get("value")
+        item = self._data.get(key)
+        if not item:
+            return None
+        if self.ttl and time.time() - item.get("stored_at", 0) > self.ttl:
+            self._data.pop(key, None)
+            self._dirty = True
+            return None
+        return item.get("value")
 
     def put(self, key: str, value: dict[str, Any]) -> None:
-        with self._lock:
-            self._data[key] = {"stored_at": time.time(), "value": value}
-            self._dirty = True
+        self._data[key] = {"stored_at": time.time(), "value": value}
+        self._dirty = True
 
     def flush(self) -> None:
-        # Serialise under the lock: flush() is called periodically during a run,
-        # while worker threads are still writing results. Without this,
-        # json.dumps walks a dict another thread is mutating.
-        with self._lock:
-            if not self._dirty:
-                return
-            payload = json.dumps(
-                {"schema": SCHEMA_VERSION, "entries": self._data}, ensure_ascii=False
-            )
-            self._dirty = False
+        if not self._dirty:
+            return
         self.path.parent.mkdir(parents=True, exist_ok=True)
+        payload = json.dumps(
+            {"schema": SCHEMA_VERSION, "entries": self._data}, ensure_ascii=False
+        )
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
         try:
             with os.fdopen(fd, "w", encoding="utf-8") as fh:
@@ -82,6 +70,7 @@ class Cache:
                 fh.flush()
                 os.fsync(fh.fileno())
             os.replace(tmp, self.path)      # atomic on POSIX and Windows
+            self._dirty = False
         finally:
             if os.path.exists(tmp):
                 try:

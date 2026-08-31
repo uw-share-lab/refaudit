@@ -38,10 +38,6 @@ class RateSpec:
 class Resolver(Protocol):
     name: str
     rate: RateSpec
-    #: Whether this source's year can be compared against the bibliography.
-    #: False for indexes that report an edition or printing rather than the
-    #: date of the work, where a difference is not evidence of an error.
-    year_is_authoritative: bool
 
     def can_handle(self, entry: Entry) -> bool: ...
 
@@ -53,7 +49,6 @@ class HttpResolver:
 
     name: str = "base"
     rate: RateSpec = RateSpec(1.0, 1.0, "default")
-    year_is_authoritative: bool = True
     api_key_env: str | None = None
     api_key_header: str | None = None
 

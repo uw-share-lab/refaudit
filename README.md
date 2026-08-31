@@ -80,14 +80,12 @@ error — so it drops into CI or a pre-submission script.
 | `--email` | contact address sent to the APIs (or `REFAUDIT_EMAIL`). Required. |
 | `--tex PATH` | LaTeX file or directory, used to work out which keys are cited |
 | `--only-cited` | check only cited keys; requires `--tex` |
-| `--resolvers` | comma-separated subset of `crossref:doi`, `datacite:doi`, `doi:content`, `arxiv:id`, `dblp`, `openalex`, `crossref:title`, `openlibrary` |
+| `--resolvers` | comma-separated subset of `crossref:doi`, `datacite:doi`, `arxiv:id`, `openalex`, `crossref:title` |
 | `--out DIR` | output directory (default `refaudit-out`) |
 | `--cache PATH` / `--no-cache` | cache location, or disable it |
 | `--ttl-days N` | how long cached results stay valid (default 90) |
 | `--timeout N` | per-request timeout in seconds (default 20) |
 | `--title-match N` | similarity at or above which two titles are the same work (default 0.75) |
-| `--workers` | entries checked in parallel (default 4). Each service keeps its own rate limit regardless |
-| `--no-duplicates` | skip the offline duplicate-entry pass |
 | `--quiet` | suppress per-entry progress, print only the summary |
 
 A run over a few hundred references takes minutes, because it is deliberately
@@ -125,44 +123,6 @@ them — has to report it unregistered. If the DOI resolves but nothing indexes
 it, that is `UNVERIFIED`; if `doi.org` cannot be reached, that is also
 `UNVERIFIED`. A reference is never called dead on one agency's silence.
 
-## Sources, and why there are several
-
-No source is load-bearing. Every one of them can be missing, metered or
-unreachable without the run producing a false finding — that is the point of
-having several, not redundancy for its own sake.
-
-| Source | Used for | Why it is in the list |
-|---|---|---|
-| Crossref | DOI + title | registers most published literature; publishes the rate-limit headers we pace ourselves by |
-| DataCite | DOI | registers preprints and deposits — every `10.48550/*` arXiv DOI, Zenodo, figshare |
-| `doi:content` | DOI | content negotiation via `doi.org`, which answers for **any** agency, including the ones we do not query directly (mEDRA, JaLC, KISTI, OP) |
-| arXiv | arXiv ID | authoritative for preprints, and the only source with the versioned record |
-| DBLP | title | hand-curated for computer science, free and unmetered; usually returns the DOI too, turning "not found" into a correction |
-| OpenAlex | title | broad but noisier, and **now meters usage** — a fallback, no longer the backbone |
-| Open Library | title | monographs, which no article index will ever hold |
-
-Sources are tried in order of how much their answer is worth: identifier lookups
-before title searches, curated indexes before harvested ones. An identifier that
-resolves to a different paper ends the search — that disagreement *is* the
-finding. A weak title hit does not, because otherwise the first index to return
-anything at all would mask a better answer from the next.
-
-**If a source is down or metered, drop it** and the rest still work:
-
-```bash
-refaudit refs.bib --email you@uwaterloo.ca \
-  --resolvers crossref:doi,datacite:doi,doi:content,arxiv:id,dblp,crossref:title
-```
-
-## Duplicates
-
-The same work cited under two keys is invisible to the per-entry check: both
-copies resolve, both are correct, both report `OK`. Only comparing entries with
-each other finds it, so that runs as its own pass — offline, on entry order, and
-matching on DOI, arXiv ID (including the arXiv DOI form of the same ID) and
-near-identical titles. It costs nothing and works when every network source is
-refusing us.
-
 ## Rate limiting
 
 Each source declares the limit its own documentation specifies, next to the code
@@ -172,18 +132,9 @@ that calls it:
 |---|---|---|
 | Crossref | 2/s, then whatever the response headers say | Crossref publishes `X-Rate-Limit-Limit` / `-Interval`; the client reads and obeys them |
 | arXiv | 1 per 3s | [arXiv's terms of use](https://info.arxiv.org/help/api/tou.html) specify exactly this |
-| DBLP | 1/s | a small academic service that asks callers not to hammer it |
-| Open Library | 1/s | donation-funded; asks for a descriptive User-Agent and modest rates |
-| DataCite | 2/s | [asks for reasonable use](https://support.datacite.org/docs/api); matched to our Crossref pace |
-| doi.org | 2–5/s | the proxy redirects to the owning agency, so each call costs a third party a real request |
 | OpenAlex | 3/s | [documented](https://docs.openalex.org/how-to-use-the-api/rate-limits-and-authentication) ceiling is 10/s and 100k/day; we use a third of it |
 | DataCite | 2/s | [asks for reasonable use](https://support.datacite.org/docs/api) and throttles heavy callers; matched to our Crossref pace |
 | doi.org | 5/s | a lightweight proxy lookup, consulted only for DOIs no agency resolved |
-
-Requests retry up to four times with exponential backoff and **full jitter**, so
-a transient failure does not become a false `UNVERIFIED` and simultaneous
-retries do not synchronise into a thundering herd. A definitive `4xx` is never
-retried — it is an answer, not a failure.
 
 A `429` is treated as instruction rather than noise: `Retry-After` is honoured,
 the token bucket is permanently halved, and after repeated refusals a circuit
