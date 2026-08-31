@@ -16,6 +16,8 @@ policy lives next to the thing it describes instead of in a constants file.
 from __future__ import annotations
 
 import os
+import threading
+import urllib.parse
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
@@ -48,12 +50,43 @@ class Resolver(Protocol):
     def resolve(self, entry: Entry) -> Outcome: ...
 
 
+# Pacing belongs to the *host*, not to the resolver. Two resolvers that call
+# api.crossref.org are still one caller as far as Crossref is concerned, so
+# giving each its own bucket would let us send the sum of their rates and earn
+# exactly the throttling the buckets exist to avoid. Shared per process, and
+# the most cautious rate any resolver declares for a host wins.
+_HOST_PACING: dict[str, tuple[TokenBucket, CircuitBreaker]] = {}
+_HOST_PACING_LOCK = threading.Lock()
+
+
+def _pacing_for(host: str, rate: RateSpec) -> tuple[TokenBucket, CircuitBreaker]:
+    with _HOST_PACING_LOCK:
+        existing = _HOST_PACING.get(host)
+        if existing is None:
+            pacing = (TokenBucket(rate.per_second, rate.burst), CircuitBreaker())
+            _HOST_PACING[host] = pacing
+            return pacing
+        bucket, breaker = existing
+        if rate.per_second < bucket.rate:
+            bucket.set_rate(rate.per_second)
+        return bucket, breaker
+
+
+def reset_pacing() -> None:
+    """Forget every shared bucket. For tests; not part of the public API."""
+    with _HOST_PACING_LOCK:
+        _HOST_PACING.clear()
+
+
 class HttpResolver:
-    """Base class wiring a resolver to its own rate limiter and circuit breaker."""
+    """Base class wiring a resolver to the shared pacing for its host."""
 
     name: str = "base"
     rate: RateSpec = RateSpec(1.0, 1.0, "default")
     year_is_authoritative: bool = True
+    #: The endpoint this resolver calls. Only its host is used, to decide which
+    #: resolvers must share a rate limit.
+    api_base: str = ""
     api_key_env: str | None = None
     api_key_header: str | None = None
 
@@ -72,11 +105,14 @@ class HttpResolver:
                 # Sent as a header, never as a query parameter, so it stays out
                 # of any URL that might be logged.
                 key_header = (self.api_key_header, value)
+        host = urllib.parse.urlsplit(self.api_base).netloc or self.name
+        bucket, breaker = _pacing_for(host, self.rate)
+        self.host = host
         self.http = HttpClient(
             user_agent=f"refaudit/{__version__} "
                        f"(+https://github.com/uw-share-lab/refaudit; mailto:{contact_email})",
-            bucket=TokenBucket(self.rate.per_second, self.rate.burst),
-            breaker=CircuitBreaker(),
+            bucket=bucket,
+            breaker=breaker,
             timeout=timeout,
             api_key_header=key_header,
         )

@@ -53,6 +53,7 @@ class CrossrefDoi(HttpResolver):
     """Authoritative lookup by DOI. The strongest signal we have."""
 
     name = "crossref:doi"
+    api_base = API
     rate = RateSpec(
         per_second=2.0,
         burst=2.0,
@@ -86,6 +87,7 @@ class CrossrefTitle(HttpResolver):
     """Best-effort lookup by bibliographic string, for entries with no identifier."""
 
     name = "crossref:title"
+    api_base = API
     rate = RateSpec(2.0, 2.0, "same service as crossref:doi")
 
     def can_handle(self, entry: Entry) -> bool:

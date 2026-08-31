@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.3.1
+
+### Fixed
+
+- **Rate limits are now enforced per host, not per resolver.** Two resolvers
+  calling the same service each held their own token bucket, so the pace we
+  actually sent was the sum of their declared rates: `api.crossref.org` was
+  being called at 4/s rather than 2/s, and `doi.org` at up to 7/s. Resolvers on
+  the same host now share one bucket and one circuit breaker, and the most
+  cautious rate any of them declares wins. A host that starts refusing us now
+  backs off every resolver that calls it, rather than only the one that noticed.
+
+
 ## 0.3.0
 
 Robustness pass: no single source is load-bearing any more, and the same work
