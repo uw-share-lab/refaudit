@@ -14,9 +14,20 @@ requires-python = ">=3.10"
 license = { text = "MIT" }
 keywords = ["bibtex", "citations", "crossref", "openalex", "arxiv", "research-integrity"]
 classifiers = [
-  "Programming Language :: Python :: 3",
+  "Development Status :: 4 - Beta",
+  "Environment :: Console",
   "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3 :: Only",
+  "Topic :: Scientific/Engineering",
   "Topic :: Text Processing :: Markup :: LaTeX",
+  "Typing :: Typed",
 ]
 # No runtime dependencies on purpose: this gets installed in a hurry, close to a
 # deadline, often on a machine someone else administers. defusedxml is used if

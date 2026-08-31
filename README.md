@@ -181,7 +181,7 @@ that calls it:
 | Open Library | 1/s | donation-funded; asks for a descriptive User-Agent and modest rates |
 | DataCite | 2/s | [asks for reasonable use](https://support.datacite.org/docs/api) and throttles heavy callers; matched to our Crossref pace |
 | doi.org | 2/s | the proxy redirects to the owning agency, so each call costs a third party a real request |
-| OpenAlex | 3/s | [documented](https://docs.openalex.org/how-to-use-the-api/rate-limits-and-authentication) ceiling is 10/s and 100k/day; we use a third of it |
+| OpenAlex | 3/s | metered against a [daily budget](https://openalex.org/pricing) that resets at midnight UTC, not a request ceiling; a free caller exhausts it quickly, so treat it as a fallback |
 
 Requests retry up to four times with exponential backoff and **full jitter**, so
 a transient failure does not become a false `UNVERIFIED` and simultaneous
