@@ -1,7 +1,7 @@
 # Contributing
 
 `main` is protected. Nobody pushes to it directly — changes arrive by pull
-request with a review from a code owner (see `.github/CODEOWNERS`).
+request with one approving review.
 
 ```bash
 git checkout -b your-change
@@ -73,6 +73,14 @@ gh api -X POST repos/uw-share-lab/refaudit/environments/pypi/deployment-branch-p
 `uw-share-lab`, repository `refaudit`, workflow `release.yml`, environment
 `pypi`. All five must match exactly or PyPI refuses the upload.
 
-**Branch protection on `main`.** Pull request with one code-owner approval,
-all four CI checks green, linear history, no force-push or delete. Admins can
+**Branch protection on `main`.** Pull request with one approving review, all
+four CI checks green, linear history, no force-push or delete. Admins can
 bypass, which is intentional; everyone else goes through review.
+
+A code-owner review is *not* required, and that is deliberate. `CODEOWNERS`
+names a single maintainer, and GitHub does not let anyone approve their own
+pull request, so the rule made every PR that maintainer opened unmergeable
+except by admin override — and a rule bypassed every time is worse than no
+rule, because it looks like review is happening when it is not. Turn it back on
+(`CODE_OWNER_REVIEWS=true ./.github/scripts/configure-repo.sh`) once
+`CODEOWNERS` lists more than one person.

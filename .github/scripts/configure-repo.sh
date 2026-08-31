@@ -17,7 +17,13 @@ set -euo pipefail
 
 REPO="${REPO:-uw-share-lab/refaudit}"
 ENVIRONMENT="${ENVIRONMENT:-pypi}"
-CODE_OWNER_REVIEWS="${CODE_OWNER_REVIEWS:-true}"
+# Off by default. CODEOWNERS names a single maintainer, and GitHub does not let
+# anyone approve their own pull request, so requiring a code-owner review made
+# every PR that maintainer opened unmergeable except by admin override. A rule
+# that has to be bypassed every time is worse than no rule: it looks like review
+# is happening when it is not. One approving review is still required. Set this
+# to true once CODEOWNERS lists more than one person.
+CODE_OWNER_REVIEWS="${CODE_OWNER_REVIEWS:-false}"
 
 command -v gh >/dev/null || { echo "error: gh CLI not found" >&2; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "error: gh is not authenticated" >&2; exit 1; }

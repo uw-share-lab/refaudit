@@ -43,6 +43,12 @@ artifacts = ["src/refaudit/py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+  # The suite is hermetic so CI cannot be flaked by a busy upstream. The live
+  # check is the deliberate exception: it runs only when REFAUDIT_LIVE_EMAIL is
+  # set, and on a schedule rather than on pull requests.
+  "live: talks to the real APIs; needs REFAUDIT_LIVE_EMAIL",
+]
 
 [tool.ruff]
 line-length = 100
