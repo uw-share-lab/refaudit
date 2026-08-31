@@ -150,3 +150,43 @@ def test_both_backends_agree_on_a_legitimate_feed(stdlib_backend):
     a = stdlib_backend.fromstring(ATOM).find(f"{NS}entry").findtext(f"{NS}title")
     b = installed.fromstring(ATOM).find(f"{NS}entry").findtext(f"{NS}title")
     assert a == b == "Just Like Me"
+
+
+# --- the assumption the fallback's shape rests on ---------------------------
+
+def test_element_tree_exposes_no_expat_parser():
+    """Why the fallback refuses documents by scanning rather than by wiring
+    expat's entity handlers.
+
+    Those handlers could only be attached through ``XMLParser.parser``, which
+    CPython no longer exposes. Code that tried was dead: guarded by
+    ``if expat is not None`` on a value that is always None. It was removed in
+    0.4.6, and the DTD scan -- which every attack test above exercises -- is
+    the whole defence.
+
+    If some future Python brings the attribute back, this fails, and the
+    decision recorded here gets revisited rather than silently forgotten.
+    """
+    import xml.etree.ElementTree as ET
+
+    assert not hasattr(ET.XMLParser(), "parser"), (
+        "XMLParser exposes .parser again; the entity-handler approach removed "
+        "in 0.4.6 may be worth reconsidering"
+    )
+
+
+def test_the_scan_is_what_refuses_a_document(stdlib_backend):
+    """Stated directly rather than inferred: the refusal happens before any
+    parsing, so it cannot depend on parser internals at all."""
+    import xml.etree.ElementTree as ET
+
+    def explode(*a, **k):
+        raise AssertionError("the document reached the parser")
+
+    original = ET.XMLParser
+    try:
+        ET.XMLParser = explode
+        with pytest.raises(stdlib_backend.XmlSecurityError):
+            stdlib_backend.fromstring(ATTACKS["billion laughs"])
+    finally:
+        ET.XMLParser = original
