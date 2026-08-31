@@ -209,3 +209,95 @@ def test_many_threads_serialise_through_the_fallback(tmp_path, no_kernel_lock):
         t.join(timeout=30)
 
     assert peak and max(peak) == 1, f"overlapping holders: peak {max(peak)}"
+
+
+# --- the degradation paths the safety argument rests on --------------------
+
+@pytest.mark.parametrize("errno_value", [
+    __import__("errno").ENOLCK,        # no locks available on this filesystem
+    __import__("errno").EOPNOTSUPP,    # the mount does not support it
+    __import__("errno").EACCES,        # anything else
+    None,                              # an OSError with no errno at all
+])
+def test_any_kernel_lock_failure_falls_back_to_the_directory(tmp_path, monkeypatch,
+                                                             errno_value):
+    """However flock fails, the answer is the same: use the fallback. There is
+    no failure mode where refusing to lock at all is the right response."""
+    def refuse(fd):
+        err = OSError("nope")
+        err.errno = errno_value
+        raise err
+
+    monkeypatch.setattr(filelock, "_lock_fd", refuse)
+    lock = tmp_path / "x.lock"
+
+    with exclusive(lock, timeout=1.0) as held:
+        assert held is True, "did not fall back to the directory lock"
+        assert (tmp_path / "x.lock.d").is_dir()
+
+
+def test_a_lock_file_that_cannot_be_opened_falls_back(tmp_path, monkeypatch):
+    monkeypatch.setattr("builtins.open", lambda *a, **k: (_ for _ in ()).throw(
+        OSError("permission denied")))
+
+    with exclusive(tmp_path / "x.lock", timeout=1.0) as held:
+        assert held is True
+        assert (tmp_path / "x.lock.d").is_dir()
+
+
+def test_the_lock_is_held_even_if_the_owner_file_cannot_be_written(tmp_path,
+                                                                   no_kernel_lock,
+                                                                   monkeypatch):
+    """Holding the lock matters more than being able to say who holds it. The
+    stale timeout is what stops that becoming permanent."""
+    real = type(tmp_path).write_text
+
+    def selective(self, *a, **k):
+        if self.name == "owner":
+            raise OSError("disk full")
+        return real(self, *a, **k)
+
+    monkeypatch.setattr(type(tmp_path), "write_text", selective)
+    with exclusive(tmp_path / "x.lock", timeout=1.0) as held:
+        assert held is True
+
+
+def test_a_failed_cleanup_does_not_raise(tmp_path, no_kernel_lock, monkeypatch):
+    """Releasing is best effort too. Anything left behind is picked up by the
+    stale timeout on the next run rather than surfacing as an error here."""
+    monkeypatch.setattr(filelock.shutil, "rmtree",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("busy")))
+
+    with exclusive(tmp_path / "x.lock", timeout=1.0) as held:
+        assert held is True
+    # leaving the block must not raise
+
+
+def test_a_failed_steal_does_not_raise(tmp_path, no_kernel_lock, monkeypatch):
+    """Two runs can decide the same lock is stale at once; the loser just
+    tries again rather than blowing up."""
+    monkeypatch.setattr(filelock, "STALE_AFTER", 0.0)
+    (tmp_path / "x.lock.d").mkdir()
+    monkeypatch.setattr(filelock.shutil, "rmtree",
+                        lambda *a, **k: (_ for _ in ()).throw(OSError("gone")))
+
+    with exclusive(tmp_path / "x.lock", timeout=0.3) as held:
+        assert held is False, "could not steal, so must run unlocked"
+
+
+def test_an_unreadable_lock_directory_is_treated_as_stale(tmp_path, no_kernel_lock,
+                                                          monkeypatch):
+    """Neither the owner file nor the directory's own mtime available. Something
+    is wrong with it, and wedging every future run is the worse failure."""
+    lock_dir = tmp_path / "x.lock.d"
+    lock_dir.mkdir()
+
+    real_stat = type(lock_dir).stat
+
+    def selective(self, *a, **k):
+        if self.name == "x.lock.d":
+            raise OSError("cannot stat")
+        return real_stat(self, *a, **k)
+
+    monkeypatch.setattr(type(lock_dir), "stat", selective)
+    assert filelock._held_since(lock_dir) is None
