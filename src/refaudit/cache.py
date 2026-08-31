@@ -13,76 +13,17 @@ slow, so it must be resumable. Three properties matter:
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
-import sys
 import tempfile
 import threading
 import time
-from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
+from .filelock import exclusive
+
 SCHEMA_VERSION = 2
-
-
-#: The platform's advisory file lock, or None where there is not one. Both come
-#: from the standard library, so this stays a zero-dependency package -- which
-#: matters for something installed in a hurry near a deadline. Resolved once at
-#: import rather than rediscovered on every flush.
-_lock_file: Callable[[int], None] | None
-
-if sys.platform == "win32":  # pragma: no cover - exercised only on Windows
-    import msvcrt
-
-    def _windows_lock(fd: int) -> None:
-        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
-
-    _lock_file = _windows_lock
-else:
-    try:
-        import fcntl
-    except ImportError:  # pragma: no cover - no locking available
-        _lock_file = None
-    else:
-
-        def _posix_lock(fd: int) -> None:
-            fcntl.flock(fd, fcntl.LOCK_EX)
-
-        _lock_file = _posix_lock
-
-
-@contextlib.contextmanager
-def _exclusive(path: Path) -> Iterator[None]:
-    """Hold an exclusive lock on ``path`` for the duration of the block.
-
-    Best effort on purpose. If the platform has no advisory locking, or the
-    filesystem will not honour it -- some network mounts refuse -- we carry on
-    unlocked. A cache is an optimisation: the worst a lost race costs is a
-    lookup done twice, and refusing to write at all would be a worse outcome
-    than the race being closed here.
-    """
-    handle = None
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        # Deliberately not a `with`: the handle has to stay open for the whole
-        # body, because closing it is what releases the lock.
-        handle = open(path, "a+b")  # noqa: SIM115
-        if _lock_file is not None:
-            _lock_file(handle.fileno())
-    except OSError:
-        # No lock. Proceed anyway; see the docstring.
-        if handle is not None:
-            handle.close()
-            handle = None
-    try:
-        yield
-    finally:
-        if handle is not None:
-            # Closing the descriptor releases both flavours of lock, so there is
-            # no unlock call to get wrong on an exception path.
-            handle.close()
 
 
 class Cache:
@@ -151,7 +92,7 @@ class Cache:
         # Read, merge and replace under one lock. Merging alone only narrowed
         # the race -- another run could still finish a whole flush between our
         # read and our replace, and be overwritten by it.
-        with _exclusive(self._lock_path):
+        with exclusive(self._lock_path):
             merged = self._read_file()
             for key, item in mine.items():
                 existing = merged.get(key)

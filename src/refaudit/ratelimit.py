@@ -13,9 +13,18 @@ altogether so the rest of the run still completes.
 
 from __future__ import annotations
 
+import contextlib
+import json
+import os
+import re
+import sys
+import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
+
+from .filelock import exclusive
 
 #: A penalty never drops the rate below ``ceiling / FLOOR_DIVISOR``. Without a
 #: floor, repeated halving reaches a rate at which a single request takes
@@ -151,3 +160,195 @@ class CircuitBreaker:
         with self._lock:
             self._failures = 0
             self._open_until = None
+
+
+#: Bumped when the meaning of a shared state file changes, so an older or newer
+#: refaudit on the same machine starts clean instead of misreading it.
+STATE_SCHEMA = 1
+
+#: Short on purpose. This lock is taken once per request, so a stale one must
+#: cost a moment rather than the ten seconds a cache flush can afford.
+_PACING_LOCK_TIMEOUT = 2.0
+
+
+def default_state_dir() -> Path:
+    """Where shared pacing state lives, under the user's own account.
+
+    Deliberately not a world-writable temp directory. Pacing another local user
+    could edit would let them slow a run to a crawl, or speed it up into the
+    ban this whole module exists to avoid.
+    """
+    if sys.platform == "win32":  # pragma: no cover - exercised only on Windows
+        base = os.environ.get("LOCALAPPDATA") or tempfile.gettempdir()
+    else:
+        base = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+        if base.startswith("~"):  # pragma: no cover - no home directory
+            base = tempfile.gettempdir()
+    return Path(base) / "refaudit" / "pacing"
+
+
+class SharedTokenBucket(TokenBucket):
+    """A token bucket whose allowance is shared by every refaudit on the machine.
+
+    Per-process pacing is right across users -- each runs under their own
+    contact address and is a separate identified caller. It is wrong for one
+    person running several processes at once, because the service sees a single
+    caller going at a multiple of the rate we promised.
+
+    The state is a small JSON file per host, read and written under a lock. The
+    cost is one lock, one read and one write per request, which is nothing
+    beside the network call it is pacing.
+
+    Every failure degrades to the parent class: if the file cannot be created,
+    read, written or locked, this is exactly an in-process ``TokenBucket``. The
+    worst case of the whole mechanism is therefore the behaviour that came
+    before it.
+    """
+
+    def __init__(self, rate: float, capacity: float = 1.0, *,
+                 state_dir: Path | str | None = None, host: str = "default") -> None:
+        super().__init__(rate, capacity)
+        # A host comes from a resolver's api_base rather than from user input,
+        # but a separator in it must still not write outside the directory.
+        safe = re.sub(r"[^A-Za-z0-9._-]", "_", host) or "default"
+        self._dir = Path(state_dir) if state_dir is not None else default_state_dir()
+        self._state = self._dir / f"{safe}.json"
+        self._lock_path = self._dir / f"{safe}.lock"
+        self._shared = True
+        try:
+            self._dir.mkdir(parents=True, exist_ok=True)
+            # Ours alone. The state files are 0600 anyway, but a directory
+            # anyone can write lets another local user sit on our lock files,
+            # which would cost us the coordination this exists to provide.
+            with contextlib.suppress(OSError):
+                os.chmod(self._dir, 0o700)
+        except OSError:
+            self._shared = False        # fall back to plain in-process pacing
+
+    # -- shared state ------------------------------------------------------
+
+    def _read(self) -> dict[str, float] | None:
+        try:
+            blob = json.loads(self._state.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return None
+        if blob.get("schema") != STATE_SCHEMA:
+            return None
+        try:
+            return {"tokens": float(blob["tokens"]), "last": float(blob["last"]),
+                    "rate": float(blob["rate"]), "ceiling": float(blob["ceiling"])}
+        except (KeyError, TypeError, ValueError):
+            return None
+
+    def _write(self, state: dict[str, float]) -> None:
+        payload = json.dumps({"schema": STATE_SCHEMA, **state})
+        fd, tmp = tempfile.mkstemp(dir=str(self._dir), suffix=".tmp")
+        try:
+            os.fchmod(fd, 0o600)        # nobody else's business, and nobody else's to edit
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(payload)
+            os.replace(tmp, self._state)
+        finally:
+            if os.path.exists(tmp):
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp)
+
+    def _current(self) -> dict[str, float]:
+        """Shared state if there is any usable state, otherwise our own."""
+        found = self._read()
+        if found is None:
+            return {"tokens": self._tokens, "last": time.time(),
+                    "rate": self._rate, "ceiling": self._ceiling}
+        # A ceiling we were built with that is lower than the stored one is
+        # policy -- the most cautious resolver on a host wins -- so keep it.
+        found["ceiling"] = min(found["ceiling"], self._ceiling)
+        found["rate"] = min(found["rate"], found["ceiling"])
+        return found
+
+    def _refill(self, state: dict[str, float]) -> None:
+        now = time.time()
+        # Wall-clock, because it has to be comparable between processes, so it
+        # can go backwards. A negative elapsed must never grant tokens.
+        elapsed = max(0.0, now - state["last"])
+        state["tokens"] = min(self._capacity, state["tokens"] + elapsed * state["rate"])
+        state["last"] = now
+
+    def _mutate(self, change) -> None:
+        """Apply a change to the shared state, or locally if that is not possible."""
+        if not self._shared:
+            change(None)
+            return
+        try:
+            with exclusive(self._lock_path, timeout=_PACING_LOCK_TIMEOUT):
+                state = self._current()
+                change(state)
+                self._write(state)
+                with self._lock:
+                    self._rate, self._ceiling = state["rate"], state["ceiling"]
+        except OSError:
+            self._shared = False
+            change(None)
+
+    # -- the TokenBucket interface ----------------------------------------
+
+    def set_rate(self, rate: float) -> None:
+        def apply(state):
+            if state is None:
+                TokenBucket.set_rate(self, rate)
+                return
+            state["ceiling"] = max(min(rate, state["ceiling"]), 1e-6)
+            state["rate"] = min(state["rate"], state["ceiling"])
+        self._mutate(apply)
+
+    def penalise(self) -> None:
+        def apply(state):
+            if state is None:
+                TokenBucket.penalise(self)
+                return
+            state["rate"] = max(state["rate"] / 2.0,
+                                state["ceiling"] / FLOOR_DIVISOR)
+        self._mutate(apply)
+
+    def recover(self) -> None:
+        def apply(state):
+            if state is None:
+                TokenBucket.recover(self)
+                return
+            if state["rate"] < state["ceiling"]:
+                state["rate"] = min(state["ceiling"],
+                                    state["rate"] + state["ceiling"] / RECOVERY_STEPS)
+        self._mutate(apply)
+
+    @property
+    def rate(self) -> float:
+        if self._shared:
+            found = self._read()
+            if found is not None:
+                return min(found["rate"], self._ceiling)
+        return self._rate
+
+    def acquire(self, tokens: float = 1.0) -> None:
+        if not self._shared:
+            TokenBucket.acquire(self, tokens)
+            return
+        while True:
+            wait = 0.0
+            try:
+                with exclusive(self._lock_path, timeout=_PACING_LOCK_TIMEOUT):
+                    state = self._current()
+                    self._refill(state)
+                    if state["tokens"] >= tokens:
+                        state["tokens"] -= tokens
+                        self._write(state)
+                        with self._lock:
+                            self._rate, self._ceiling = state["rate"], state["ceiling"]
+                        return
+                    wait = (tokens - state["tokens"]) / state["rate"]
+                    self._write(state)
+            except OSError:
+                # Lost the ability to share part-way through a run. Keep pacing
+                # ourselves rather than stopping.
+                self._shared = False
+                TokenBucket.acquire(self, tokens)
+                return
+            time.sleep(min(wait, 5.0))

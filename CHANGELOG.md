@@ -1,5 +1,69 @@
 # Changelog
 
+## 0.4.5
+
+### Added
+
+- **Rate limits are shared between your own concurrent runs.** Per-process
+  pacing is right across *users* -- everyone runs under their own contact
+  address and is a separate identified caller. It is wrong for one person
+  running several at once: two terminals, a shell loop or a cluster job array
+  are a single caller as far as Crossref is concerned, and each process taking
+  the full documented rate sends a multiple of what we promised.
+
+  Each host's token bucket now keeps its state in a small file under the user's
+  own cache directory, so four simultaneous runs share one allowance instead of
+  taking four. A `429` in any of them slows all of them, and the recovery
+  afterwards is shared too. Per user rather than per machine, deliberately: two
+  people on a shared server are two identified callers and should not throttle
+  each other. Not a world-writable location either -- pacing another local user
+  could edit would let them slow a run down, or speed it up into a ban.
+
+  It degrades in every direction. If the state file cannot be created, read,
+  written or locked, each run paces itself exactly as before, so the worst case
+  of the feature is the behaviour that preceded it. `--no-shared-pacing` or
+  `REFAUDIT_NO_SHARED_PACING=1` turns it off and keeps refaudit from writing
+  anything outside `--out`.
+
+- **Locking works where `flock` does not.** Some network mounts ignore it, and
+  without a lock daemon it can appear to succeed while locking nothing. The new
+  `filelock` module falls back to an atomic lock *directory*, which works in
+  most of those places but reintroduces the one problem `flock` does not have:
+  a process that dies holding it blocks every later run forever.
+
+  Two rules make that safe, and both are tested. A lock older than any real
+  critical section -- 30 seconds against a flush measured in milliseconds -- is
+  taken over. And waiting is bounded: if the lock cannot be had in time, the run
+  says so and carries on without it, because everything guarded here is an
+  optimisation and a run that never starts is the worse outcome.
+
+  The first version of this had a race the tests caught: a holder that had
+  created the directory but not yet written its owner file looked abandoned to
+  everybody else, and four threads got into the critical section at once. The
+  directory's own mtime is now the backstop, so a lock taken microseconds ago
+  can never look old.
+
+### Testing
+
+- BibTeX parsing edge cases a hand-written bibliography reaches and a tidy one
+  does not: escaped braces, quoted values, escaped quotes inside them, nested
+  braces, `@comment`/`@preamble`/`@string`, a truncated final entry, and
+  case-insensitive field names.
+- `--tex` handling: a single file rather than a directory, a stable walk order,
+  a `%`-commented `\cite` not counting as cited, and one unreadable file in a
+  large tree being skipped rather than aborting the run.
+- Resolver `can_handle` guards, which are what stop a DOI lookup being asked
+  about a preprint that has none -- where a `NotFound` would read as a real
+  absence. Two of these documented deliberate designs that a first reading gets
+  backwards: Open Library is not restricted to `@book`, because monographs are
+  routinely filed as `@article`, and OpenAlex takes an identifier or a title
+  rather than being title-only.
+- Crossref's date-field fallback, an unparseable date, an empty message and a
+  record with no title.
+
+320 tests, 92% coverage.
+
+
 ## 0.4.4
 
 No behaviour change. More of the coverage 0.4.3 started, on the two places it
