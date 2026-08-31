@@ -12,16 +12,21 @@ fine and only the identifier is wrong.
 ## Install
 
 ```bash
-pip install git+https://github.com/uw-share-lab/refaudit.git
+pip install refaudit
 ```
 
 Python 3.10+. No runtime dependencies.
 
-> PyPI publishing is wired up (Trusted Publishing, see `.github/workflows/release.yml`)
-> but no release has been cut yet, so `pip install refaudit` will not work until
-> the first tagged release. Use the command above in the meantime.
+Latest development version:
+
+```bash
+pip install git+https://github.com/uw-share-lab/refaudit.git
+```
 
 ## Quick start
+
+It reads the whole `.bib` and checks **every** entry in it — you point it at the
+file and it works through the lot, one entry at a time.
 
 ```bash
 # every entry in the file
