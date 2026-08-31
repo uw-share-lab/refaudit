@@ -11,13 +11,12 @@ malformed references and a false entry costs you a desk reject.
         print(result.key, result.verdict.value)
 """
 
+from ._version import __version__
 from .bibtex import cited_keys, find_tex, parse_file, parse_string
 from .cache import Cache
 from .checker import Checker, Thresholds
 from .models import CheckResult, Entry, Found, NotFound, Record, Unavailable, Verdict
 from .resolvers import default_resolvers
-
-__version__ = "0.1.0"
 
 __all__ = [
     "Cache",

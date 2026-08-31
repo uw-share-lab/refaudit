@@ -115,3 +115,29 @@ def test_surnames_match_is_tolerant_but_not_blind():
     assert surnames_match("van der berg", "berg")
     assert surnames_match("", "anything")          # nothing to contradict
     assert not surnames_match("ferguson", "vasconcelos")
+
+
+def test_clean_doi_accepts_schemeless_doi_org_prefix():
+    """.bib files carry "doi.org/10.x" as often as the full URL.
+
+    Dropping it downgraded the entry to a title search, which still produced a
+    verdict -- so the weaker check was invisible rather than loud.
+    """
+    from refaudit.normalize import clean_doi
+
+    expected = "10.48550/arXiv.2410.07304"
+    for raw in (
+        "doi.org/10.48550/arXiv.2410.07304",
+        "www.doi.org/10.48550/arXiv.2410.07304",
+        "dx.doi.org/10.48550/arXiv.2410.07304",
+        "https://doi.org/10.48550/arXiv.2410.07304",
+        "DOI: https://doi.org/10.48550/arXiv.2410.07304",
+    ):
+        assert clean_doi(raw) == expected, raw
+
+
+def test_clean_doi_still_rejects_non_dois():
+    from refaudit.normalize import clean_doi
+
+    for raw in ("not a doi", "ftp://evil.example/10.1/x", "doi.org/nope", ""):
+        assert clean_doi(raw) == ""

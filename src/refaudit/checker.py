@@ -21,6 +21,7 @@ from dataclasses import dataclass
 
 from .bibtex import NON_ARCHIVAL_TYPES
 from .cache import Cache
+from .doi_registry import DoiExistence
 from .models import (
     CheckResult,
     Entry,
@@ -51,12 +52,16 @@ class Checker:
         *,
         cache: Cache | None = None,
         thresholds: Thresholds = DEFAULT_THRESHOLDS,
+        doi_existence: DoiExistence | None = None,
     ) -> None:
         if not resolvers:
             raise ValueError("at least one resolver is required")
         self.resolvers = list(resolvers)
         self.cache = cache
         self.thresholds = thresholds
+        # Optional so a caller can run fully offline against a stub; when it is
+        # absent no DEAD_DOI can be issued, which is the safe direction.
+        self.doi_existence = doi_existence
 
     # -- public ------------------------------------------------------------
 
@@ -120,6 +125,7 @@ class Checker:
 
         any_unavailable: list[str] = []
         authoritative_absence: list[str] = []
+        doi_disowned_by: list[str] = []
 
         for resolver in applicable:
             outcome = resolver.resolve(entry)
@@ -129,18 +135,41 @@ class Checker:
                 continue
 
             if isinstance(outcome, NotFound):
-                # A DOI the registrar does not know is a real problem. A failed
-                # title search is not, on its own.
+                # No single agency speaks for the whole DOI system, so one
+                # agency's "not mine" is only a candidate for DEAD_DOI. It is
+                # settled after every resolver has had its turn.
                 if resolver.name.endswith(":doi") and clean_doi(entry.doi):
-                    return CheckResult(entry.key, Verdict.DEAD_DOI, entry.title,
-                                       source=resolver.name,
-                                       note=f"DOI {clean_doi(entry.doi)} not registered",
-                                       cited=cited)
+                    doi_disowned_by.append(resolver.name)
                 authoritative_absence.append(f"{outcome.source}: {outcome.detail[:50]}")
                 continue
 
             if isinstance(outcome, Found):
                 return self._judge(entry, outcome.record, resolver, has_identifier, cited)
+
+        # Nothing resolved the entry. If a DOI was disowned by every agency we
+        # asked, ask the DOI proxy -- which answers for all of them -- before
+        # calling the reference dead.
+        if doi_disowned_by:
+            doi = clean_doi(entry.doi)
+            registered = self.doi_existence.exists(doi) if self.doi_existence else None
+            if registered is False:
+                return CheckResult(entry.key, Verdict.DEAD_DOI, entry.title,
+                                   source="doi.org",
+                                   note=f"DOI {doi} is not registered with any agency",
+                                   cited=cited)
+            if registered is True:
+                # Real DOI, but no index we can read holds metadata for it, so
+                # the reference itself is unchecked rather than wrong.
+                return CheckResult(
+                    entry.key, Verdict.UNVERIFIED, entry.title, source="doi.org",
+                    note=f"DOI {doi} resolves but is indexed by none of: "
+                         f"{', '.join(doi_disowned_by)}",
+                    cited=cited)
+            return CheckResult(
+                entry.key, Verdict.UNVERIFIED, entry.title,
+                note=f"DOI {doi} not found in {', '.join(doi_disowned_by)}; "
+                     f"could not reach doi.org to confirm",
+                cited=cited)
 
         if any_unavailable and not authoritative_absence:
             return CheckResult(entry.key, Verdict.UNVERIFIED, entry.title,

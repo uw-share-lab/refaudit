@@ -62,12 +62,12 @@ refaudit sample-base.bib --email you@uwaterloo.ca --tex sections/ --only-cited
 | Verdict | Meaning |
 |---|---|
 | `TITLE_MISMATCH` | an identifier resolved to a different paper — check first |
-| `DEAD_DOI` | the DOI is not registered |
+| `DEAD_DOI` | the DOI is registered with no agency — confirmed against `doi.org` |
 | `AUTHOR_MISMATCH` | titles agree, first author does not |
 | `YEAR_MISMATCH` | titles agree, year is off by more than one |
 | `NOT_FOUND` | no identifier, and no title match anywhere |
-| `UNVERIFIED` | **a source was unreachable — this says nothing about the entry** |
-| `SKIPPED` | `@misc`/`@online` with no identifier; nothing to check against |
+| `UNVERIFIED` | **not checked — a source was unreachable, or the DOI is real but unindexed. Says nothing about the entry** |
+| `SKIPPED` | `@misc`/`@online`/`@phdthesis` and similar with no identifier; nothing to check against |
 | `OK` | resolved and consistent |
 
 Exit status is `1` if there is at least one finding, `0` if not, `2` on a usage
@@ -80,7 +80,7 @@ error — so it drops into CI or a pre-submission script.
 | `--email` | contact address sent to the APIs (or `REFAUDIT_EMAIL`). Required. |
 | `--tex PATH` | LaTeX file or directory, used to work out which keys are cited |
 | `--only-cited` | check only cited keys; requires `--tex` |
-| `--resolvers` | comma-separated subset of `crossref:doi`, `arxiv:id`, `openalex`, `crossref:title` |
+| `--resolvers` | comma-separated subset of `crossref:doi`, `datacite:doi`, `arxiv:id`, `openalex`, `crossref:title` |
 | `--out DIR` | output directory (default `refaudit-out`) |
 | `--cache PATH` / `--no-cache` | cache location, or disable it |
 | `--ttl-days N` | how long cached results stay valid (default 90) |
@@ -108,10 +108,20 @@ and only `Found` can produce a negative verdict. `UNVERIFIED` results are listed
 separately from findings and are never cached, so a transient outage does not
 get baked into later runs.
 
-Relatedly, evidence is weighted by strength: a DOI that Crossref does not
-recognise is a finding, but a title search returning something different is only
-a finding when there was no identifier to go on. Otherwise every arXiv-only
-workshop paper that Crossref does not index would be flagged.
+Relatedly, evidence is weighted by strength: a title search returning something
+different is only a finding when there was no identifier to go on. Otherwise
+every arXiv-only workshop paper that Crossref does not index would be flagged.
+
+The same care applies to DOIs, and for a while it did not. No registration
+agency speaks for the whole DOI system: Crossref registers most published
+literature, DataCite registers preprints and deposits — including every arXiv
+DOI (`10.48550/*`), Zenodo and figshare. Reading Crossref's 404 as "this DOI
+does not exist" reported 22 live preprints in a real bibliography as dead
+references. `DEAD_DOI` is now the one verdict confirmed against a second source:
+every agency has to disown the DOI *and* `doi.org` — which answers for all of
+them — has to report it unregistered. If the DOI resolves but nothing indexes
+it, that is `UNVERIFIED`; if `doi.org` cannot be reached, that is also
+`UNVERIFIED`. A reference is never called dead on one agency's silence.
 
 ## Rate limiting
 
@@ -123,6 +133,8 @@ that calls it:
 | Crossref | 2/s, then whatever the response headers say | Crossref publishes `X-Rate-Limit-Limit` / `-Interval`; the client reads and obeys them |
 | arXiv | 1 per 3s | [arXiv's terms of use](https://info.arxiv.org/help/api/tou.html) specify exactly this |
 | OpenAlex | 3/s | [documented](https://docs.openalex.org/how-to-use-the-api/rate-limits-and-authentication) ceiling is 10/s and 100k/day; we use a third of it |
+| DataCite | 2/s | [asks for reasonable use](https://support.datacite.org/docs/api) and throttles heavy callers; matched to our Crossref pace |
+| doi.org | 5/s | a lightweight proxy lookup, consulted only for DOIs no agency resolved |
 
 A `429` is treated as instruction rather than noise: `Retry-After` is honoured,
 the token bucket is permanently halved, and after repeated refusals a circuit
@@ -150,6 +162,10 @@ separate, more reliable pool, and it is the courtesy their docs ask for.
   the supply chain.
 
 ## Troubleshooting
+
+**`UNVERIFIED` on an entry whose DOI you know is fine.** The DOI resolves, but
+none of the indexes we can read hold metadata for it, so the reference is
+unchecked rather than wrong. This is the intended outcome, not a failure.
 
 **Lots of `UNVERIFIED` results.** A source refused your network. arXiv in
 particular rate-limits by IP and will 429 an entire institution or VPN

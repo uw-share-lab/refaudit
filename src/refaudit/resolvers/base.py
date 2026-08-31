@@ -19,6 +19,7 @@ import os
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
 
+from .._version import __version__
 from ..http import HttpClient
 from ..models import Entry, Outcome
 from ..ratelimit import CircuitBreaker, TokenBucket
@@ -67,7 +68,8 @@ class HttpResolver:
                 # of any URL that might be logged.
                 key_header = (self.api_key_header, value)
         self.http = HttpClient(
-            user_agent=f"refaudit/0.1 (+https://github.com/uw-share-lab/refaudit; mailto:{contact_email})",
+            user_agent=f"refaudit/{__version__} "
+                       f"(+https://github.com/uw-share-lab/refaudit; mailto:{contact_email})",
             bucket=TokenBucket(self.rate.per_second, self.rate.burst),
             breaker=CircuitBreaker(),
             timeout=timeout,

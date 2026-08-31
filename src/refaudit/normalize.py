@@ -117,7 +117,11 @@ def clean_doi(raw: str) -> str:
         return ""
     value = strip_tex(raw).strip()
     value = re.sub(r"^\s*(doi:\s*)?", "", value, flags=re.IGNORECASE)
-    value = re.sub(r"^https?://(dx\.)?doi\.org/", "", value, flags=re.IGNORECASE)
+    # The scheme is optional: .bib files carry "doi.org/10.x" as often as the
+    # full URL, and dropping the DOI would silently downgrade the entry to a
+    # title search -- a weaker check that still looks like it worked.
+    value = re.sub(r"^(https?://)?(www\.)?(dx\.)?doi\.org/", "", value,
+                   flags=re.IGNORECASE)
     value = value.strip().rstrip(".,;")
     return value if _DOI_RE.match(value) else ""
 

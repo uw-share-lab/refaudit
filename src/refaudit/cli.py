@@ -12,6 +12,7 @@ from . import __version__
 from .bibtex import cited_keys, find_tex, parse_file
 from .cache import Cache
 from .checker import Checker, Thresholds
+from .doi_registry import DoiExistence
 from .models import Verdict
 from .resolvers import AVAILABLE, default_resolvers
 
@@ -99,7 +100,9 @@ def main(argv: list[str] | None = None) -> int:
     cache = None if args.no_cache else Cache(args.cache or (args.out / "cache.json"),
                                              ttl_days=args.ttl_days)
     checker = Checker(resolvers, cache=cache,
-                      thresholds=Thresholds(title_match=args.title_match))
+                      thresholds=Thresholds(title_match=args.title_match),
+                      doi_existence=DoiExistence(contact_email=args.email,
+                                                 timeout=args.timeout))
 
     results = []
     try:
