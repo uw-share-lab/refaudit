@@ -39,13 +39,13 @@ class Duplicate:
 
 
 def _arxiv_of(entry: Entry) -> str:
-    """arXiv ID from either the eprint field or a DataCite arXiv DOI."""
-    direct = clean_arxiv_id(entry.arxiv_id)
-    if direct:
-        return direct.lower()
-    doi = clean_doi(entry.doi).lower()
-    prefix = "10.48550/arxiv."
-    return doi[len(prefix):] if doi.startswith(prefix) else ""
+    """arXiv ID however the entry happens to carry it.
+
+    ``Entry.arxiv_id`` already searches the eprint field, the free-text fields
+    a Google Scholar export uses, and the arXiv DOI form, so the two spellings
+    of one preprint match here without this needing its own rules.
+    """
+    return clean_arxiv_id(entry.arxiv_id).lower()
 
 
 def find_duplicates(entries: list[Entry]) -> list[Duplicate]:

@@ -141,3 +141,58 @@ def test_clean_doi_still_rejects_non_dois():
 
     for raw in ("not a doi", "ftp://evil.example/10.1/x", "doi.org/nope", ""):
         assert clean_doi(raw) == ""
+
+
+def test_arxiv_id_is_found_in_the_journal_field():
+    """Google Scholar exports put it there instead of in `eprint`.
+
+    Only reading `eprint` reported real, findable preprints as missing -- the
+    most common shape of entry there is for recent work.
+    """
+    from refaudit.models import Entry
+    from refaudit.normalize import clean_arxiv_id
+
+    e = Entry(key="k", entry_type="article",
+              fields={"title": "T", "journal": "arXiv preprint arXiv:2506.08872"})
+    assert clean_arxiv_id(e.arxiv_id) == "2506.08872"
+
+
+def test_arxiv_id_is_found_in_other_free_text_fields():
+    from refaudit.models import Entry
+    from refaudit.normalize import clean_arxiv_id
+
+    for field, value in [
+        ("note", "arXiv:2310.13548"),
+        ("url", "https://arxiv.org/abs/2405.10632"),
+        ("howpublished", "\\url{https://arxiv.org/pdf/2505.13995v2}"),
+        ("doi", "10.48550/arXiv.2502.14052"),
+    ]:
+        e = Entry(key="k", entry_type="misc", fields={"title": "T", field: value})
+        assert clean_arxiv_id(e.arxiv_id), f"{field}={value!r} yielded nothing"
+
+
+def test_an_explicit_eprint_field_still_wins():
+    from refaudit.models import Entry
+    from refaudit.normalize import clean_arxiv_id
+
+    e = Entry(key="k", entry_type="misc",
+              fields={"title": "T", "eprint": "2310.13548",
+                      "journal": "arXiv preprint arXiv:9999.99999"})
+    assert clean_arxiv_id(e.arxiv_id) == "2310.13548"
+
+
+def test_free_text_without_an_arxiv_id_yields_nothing():
+    from refaudit.models import Entry
+
+    for value in ("Nature Human Behaviour", "Proceedings of CHI 2020", ""):
+        e = Entry(key="k", entry_type="article", fields={"title": "T", "journal": value})
+        assert e.arxiv_id == "", f"{value!r} should not look like an arXiv id"
+
+
+def test_a_journal_merely_mentioning_arxiv_is_not_an_id():
+    """"arXiv" as a word must not be mistaken for an identifier."""
+    from refaudit.models import Entry
+
+    e = Entry(key="k", entry_type="article",
+              fields={"title": "T", "journal": "arXiv e-prints"})
+    assert e.arxiv_id == ""

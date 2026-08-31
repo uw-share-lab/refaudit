@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.2
+
+### Fixed
+
+- **arXiv identifiers are now found wherever the entry keeps them.** BibTeX
+  exported from Google Scholar writes `journal={arXiv preprint arXiv:2506.08872}`
+  rather than filling in `eprint`, and refaudit only read `eprint`. Real,
+  findable preprints were therefore reported `NOT_FOUND` -- on the most common
+  shape of entry there is for recent work. The identifier is now also read from
+  `journal`, `note`, `howpublished`, `booktitle`, `url` and the
+  `10.48550/arXiv.*` DOI form. An explicit `eprint` still wins.
+
+  Duplicate detection inherits this, so the same preprint cited once with an
+  `eprint` and once with a Scholar-style `journal` string is now recognised as
+  one work.
+
+
 ## 0.3.1
 
 ### Fixed

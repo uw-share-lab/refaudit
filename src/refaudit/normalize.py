@@ -138,3 +138,32 @@ def clean_arxiv_id(raw: str) -> str:
     value = re.sub(r"^https?://arxiv\.org/abs/", "", value, flags=re.IGNORECASE)
     value = re.sub(r"v\d+$", "", value.strip())
     return value if _ARXIV_RE.match(value) else ""
+
+
+#: An arXiv identifier as it appears inside free text rather than in its own
+#: field. Ordered so the most explicit form is tried first.
+_ARXIV_IN_TEXT = (
+    re.compile(r"arxiv\.org/(?:abs|pdf)/([^\s,;}]+)", re.IGNORECASE),
+    re.compile(r"10\.48550/arxiv\.([^\s,;}]+)", re.IGNORECASE),
+    re.compile(r"arxiv[:\s]+([^\s,;}]+)", re.IGNORECASE),
+)
+
+
+def find_arxiv_id(text: str) -> str:
+    """Pull an arXiv identifier out of a free-text field, or "".
+
+    BibTeX exported from Google Scholar puts the identifier in the journal
+    field -- ``journal={arXiv preprint arXiv:2506.08872}`` -- rather than in
+    ``eprint``. Only reading ``eprint`` therefore reported real, findable
+    preprints as missing, which is the most common shape of bibliography entry
+    there is for recent work.
+    """
+    if not text:
+        return ""
+    cleaned = strip_tex(text)
+    for pattern in _ARXIV_IN_TEXT:
+        for match in pattern.finditer(cleaned):
+            found = clean_arxiv_id(match.group(1))
+            if found:
+                return found
+    return ""
