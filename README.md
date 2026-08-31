@@ -228,9 +228,12 @@ slow anybody else down, and no amount of parallel use by a lab gets an individua
 blocked. There is nothing to coordinate and no shared limit to configure.
 
 Two runs *in the same directory* do share one thing: the cache file. That is
-safe — writes are atomic and each flush merges what is already on disk rather
-than overwriting it, so neither run loses the other's entries. If you would
-rather keep them entirely separate, give each one its own `--out`.
+safe. Writes are atomic, each flush merges what is already on disk rather than
+overwriting it, and the read-merge-write happens under a lock, so neither run
+loses the other's entries. Where a filesystem will not honour the lock, as some
+network mounts do not, the merge still runs and the worst case is a lookup done
+twice. If you would rather keep the runs entirely separate, give each one
+its own `--out`.
 
 ## Security
 
@@ -341,8 +344,31 @@ ruff check .
 mypy src
 ```
 
-`main` is protected: changes go through a pull request with a code-owner review,
-and CI must pass on Python 3.10-3.13. See [CONTRIBUTING.md](CONTRIBUTING.md).
+The suite is hermetic so CI cannot be failed by a busy upstream. That has a
+cost worth being honest about: a green run proves the code behaves correctly
+against fixtures, and says nothing about whether it still parses what Crossref
+actually sends. One test does check that, and it is opt-in:
+
+```bash
+REFAUDIT_LIVE_EMAIL=you@uni.edu pytest tests/test_live.py -v -m live
+```
+
+It checks seven references against the real services: one correct DOI, one
+arXiv id, one DataCite DOI, a real DOI deliberately paired with the wrong
+title, a DOI that does not exist, and an entry with no identifier at all. What
+it asserts is the thing that must never break, which is that a correct
+reference is never reported as a finding. A source being unreachable is allowed
+to turn any of them `UNVERIFIED`, because that is a fact about the network
+rather than the entry.
+
+It also runs weekly from [`.github/workflows/live.yml`](.github/workflows/live.yml),
+away from pull requests, so an upstream having a bad day costs a notification
+rather than a blocked merge. Worth running by hand before cutting a release:
+0.4.1 exists because it caught something 127 hermetic tests could not.
+
+`main` is protected: changes go through a pull request with one approving
+review, and CI must pass on Python 3.10-3.13. See
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 Repository settings that releases depend on are kept as code in
 [`.github/scripts/configure-repo.sh`](.github/scripts/configure-repo.sh) and are

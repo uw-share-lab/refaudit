@@ -1,5 +1,57 @@
 # Changelog
 
+## 0.4.2
+
+### Added
+
+- **An opt-in check against the real services.** The suite is hermetic so CI
+  cannot be failed by a busy upstream, which is the right trade but hides
+  something: a green run proves the code works against fixtures somebody wrote
+  by hand, not that it still parses what Crossref sends. 0.4.1 exists because a
+  live run found what 127 hermetic tests could not.
+
+  `tests/test_live.py` checks seven references against Crossref, arXiv,
+  DataCite, DBLP, OpenAlex and doi.org, and runs only when
+  `REFAUDIT_LIVE_EMAIL` is set. It asserts the property that must never break:
+  a correct reference is never reported as a finding. An unreachable source may
+  turn any entry `UNVERIFIED`, since that is a fact about the network rather
+  than the entry, so an outage does not produce a false failure. One assertion
+  requires that something resolved, or a total outage would let the file pass
+  while proving nothing.
+
+  It also runs weekly from `.github/workflows/live.yml`, away from pull
+  requests, so a bad day upstream costs a notification instead of a blocked
+  merge.
+
+### Fixed
+
+- **The cache race is closed rather than narrowed.** 0.4.0 made `flush()` merge
+  what was on disk instead of overwriting it, which stopped two runs erasing
+  each other wholesale. A smaller window survived: another run could finish an
+  entire flush between our read and our replace, and be overwritten by it. The
+  read, the merge and the replace now happen under an advisory lock held on a
+  `.lock` file beside the cache — beside it, because locking the cache itself
+  would be undone by the atomic replace that swaps the file out.
+
+  The lock is best effort. Where a filesystem will not honour it, some network
+  mounts among them, the merge still runs and the worst case is the old, small
+  race. Refusing to write at all would be a worse outcome than the problem
+  being fixed. `fcntl` and `msvcrt` both come from the standard library, so
+  this remains a zero-dependency package.
+
+- **Workflow actions no longer run on a deprecated Node.** `upload-artifact`
+  and `download-artifact` were pinned to versions that GitHub was force-running
+  on Node 24 while warning about Node 20. Bumped to v7 and v8, with `checkout`
+  and `setup-python` brought to v7 alongside them.
+
+- **`configure-repo.sh` no longer reverts branch protection.** It defaulted
+  `CODE_OWNER_REVIEWS` to true, so re-running it would have silently restored a
+  rule that makes every pull request from the sole code owner unmergeable
+  except by admin override. It now defaults to false and says why, and the
+  README and CONTRIBUTING no longer describe a code-owner review that is not
+  required.
+
+
 ## 0.4.1
 
 ### Fixed

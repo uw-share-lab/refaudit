@@ -13,20 +13,82 @@ slow, so it must be resumable. Three properties matter:
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import sys
 import tempfile
 import threading
 import time
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
 SCHEMA_VERSION = 2
 
 
+#: The platform's advisory file lock, or None where there is not one. Both come
+#: from the standard library, so this stays a zero-dependency package -- which
+#: matters for something installed in a hurry near a deadline. Resolved once at
+#: import rather than rediscovered on every flush.
+_lock_file: Callable[[int], None] | None
+
+if sys.platform == "win32":  # pragma: no cover - exercised only on Windows
+    import msvcrt
+
+    def _windows_lock(fd: int) -> None:
+        msvcrt.locking(fd, msvcrt.LK_LOCK, 1)
+
+    _lock_file = _windows_lock
+else:
+    try:
+        import fcntl
+    except ImportError:  # pragma: no cover - no locking available
+        _lock_file = None
+    else:
+
+        def _posix_lock(fd: int) -> None:
+            fcntl.flock(fd, fcntl.LOCK_EX)
+
+        _lock_file = _posix_lock
+
+
+@contextlib.contextmanager
+def _exclusive(path: Path) -> Iterator[None]:
+    """Hold an exclusive lock on ``path`` for the duration of the block.
+
+    Best effort on purpose. If the platform has no advisory locking, or the
+    filesystem will not honour it -- some network mounts refuse -- we carry on
+    unlocked. A cache is an optimisation: the worst a lost race costs is a
+    lookup done twice, and refusing to write at all would be a worse outcome
+    than the race being closed here.
+    """
+    handle = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # Deliberately not a `with`: the handle has to stay open for the whole
+        # body, because closing it is what releases the lock.
+        handle = open(path, "a+b")  # noqa: SIM115
+        if _lock_file is not None:
+            _lock_file(handle.fileno())
+    except OSError:
+        # No lock. Proceed anyway; see the docstring.
+        if handle is not None:
+            handle.close()
+            handle = None
+    try:
+        yield
+    finally:
+        if handle is not None:
+            # Closing the descriptor releases both flavours of lock, so there is
+            # no unlock call to get wrong on an exception path.
+            handle.close()
+
+
 class Cache:
     def __init__(self, path: str | Path, ttl_days: float = 90.0) -> None:
         self.path = Path(path)
+        self._lock_path = self.path.with_name(self.path.name + ".lock")
         self.ttl = ttl_days * 86400.0
         self._data: dict[str, dict[str, Any]] = {}
         self._dirty = False
@@ -86,29 +148,33 @@ class Cache:
         # replacing rather than closing it: a lost entry costs a repeated lookup
         # on the next run, never a wrong result, which does not justify making
         # every install depend on file locking that differs per platform.
-        merged = self._read_file()
-        for key, item in mine.items():
-            existing = merged.get(key)
-            if existing is None or item.get("stored_at", 0) >= existing.get("stored_at", 0):
-                merged[key] = item
+        # Read, merge and replace under one lock. Merging alone only narrowed
+        # the race -- another run could still finish a whole flush between our
+        # read and our replace, and be overwritten by it.
+        with _exclusive(self._lock_path):
+            merged = self._read_file()
+            for key, item in mine.items():
+                existing = merged.get(key)
+                if existing is None or item.get("stored_at", 0) >= existing.get("stored_at", 0):
+                    merged[key] = item
 
-        payload = json.dumps(
-            {"schema": SCHEMA_VERSION, "entries": merged}, ensure_ascii=False
-        )
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                fh.write(payload)
-                fh.flush()
-                os.fsync(fh.fileno())
-            os.replace(tmp, self.path)      # atomic on POSIX and Windows
-        finally:
-            if os.path.exists(tmp):
-                try:
-                    os.unlink(tmp)
-                except OSError:
-                    pass
+            payload = json.dumps(
+                {"schema": SCHEMA_VERSION, "entries": merged}, ensure_ascii=False
+            )
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                    fh.write(payload)
+                    fh.flush()
+                    os.fsync(fh.fileno())
+                os.replace(tmp, self.path)      # atomic on POSIX and Windows
+            finally:
+                if os.path.exists(tmp):
+                    try:
+                        os.unlink(tmp)
+                    except OSError:
+                        pass
 
     # PYI034 prefers Self, which is 3.11+; this package supports 3.10.
     def __enter__(self) -> Cache:  # noqa: PYI034
