@@ -32,7 +32,6 @@ can log the difference instead of assuming it got what it asked for.
 from __future__ import annotations
 
 import contextlib
-import errno
 import os
 import shutil
 import sys
@@ -140,8 +139,14 @@ def _mkdir_lock(path: Path, timeout: float) -> Iterator[bool]:
                 try:
                     shutil.rmtree(lock_dir)
                 except OSError:
-                    pass                    # somebody else got there first
-                continue
+                    # Somebody else got there first, or we are not allowed to.
+                    # Fall through to the deadline rather than retrying at
+                    # once: a stale lock we can never remove would otherwise
+                    # spin here forever, which is precisely the unbounded wait
+                    # this whole design exists to avoid.
+                    pass
+                else:
+                    continue                # took it; try to claim immediately
 
             if time.monotonic() >= deadline:
                 break                       # run unlocked rather than not at all
@@ -172,16 +177,14 @@ def exclusive(path: Path, *, timeout: float = ACQUIRE_TIMEOUT) -> Iterator[bool]
             # is what releases the lock.
             handle = open(path, "a+b")  # noqa: SIM115
             _lock_fd(handle.fileno())
-        except OSError as e:
+        except OSError:
+            # However it failed -- ENOLCK and EOPNOTSUPP from a filesystem that
+            # will not lock, EACCES from one we cannot write -- the answer is
+            # the same, and it is what the directory fallback is for. There is
+            # no errno for which refusing to lock at all is the right response.
             if handle is not None:
                 handle.close()
                 handle = None
-            # ENOLCK/EOPNOTSUPP mean the filesystem will not lock for us, which
-            # is exactly what the directory fallback is for.
-            if e.errno not in (errno.ENOLCK, errno.EOPNOTSUPP, errno.EINVAL):
-                with _mkdir_lock(path, timeout) as held:
-                    yield held
-                return
         if handle is not None:
             try:
                 yield True

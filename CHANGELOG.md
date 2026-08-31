@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.4.7
+
+### Fixed
+
+- **A stale lock that cannot be removed no longer spins forever.** The
+  directory-lock fallback added in 0.4.5 claimed a bounded wait, and did not
+  have one on every path. When a lock looked stale but `rmtree` failed --
+  another run stealing it at the same moment, or a permission the process does
+  not have -- the loop went straight back to the top without ever reaching its
+  deadline check. A hot loop with no exit, which is the exact failure the
+  bounded wait exists to prevent.
+
+  A failed steal now falls through to the deadline and the poll interval like
+  any other contention, so the wait is bounded whatever happens. A *successful*
+  steal still retries immediately.
+
+  Found by a test written for the degradation paths, which hung rather than
+  passed.
+
+- **Simplified the fallback decision in `exclusive`.** It tested `errno` to
+  decide whether to fall back to the directory lock, but both branches reached
+  the fallback, so the test decided nothing. There is no errno for which
+  refusing to lock at all is the right response, and the code now says so.
+
+`filelock.py` reaches 100% coverage; overall 93% to 94%, 334 tests.
+
+
 ## 0.4.6
 
 ### Changed
