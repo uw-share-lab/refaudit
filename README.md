@@ -11,7 +11,11 @@ fine and only the identifier is wrong.
 
 ## Install
 
-Not on PyPI yet — install from this repository:
+```bash
+pip install refaudit
+```
+
+Or straight from source:
 
 ```bash
 pip install git+https://github.com/uw-share-lab/refaudit.git
@@ -185,12 +189,15 @@ to add a source, and pass it to `Checker` alongside the built-ins.
 
 ## Development
 
-```
+```bash
 pip install -e ".[dev]"
 pytest          # offline: the suite uses fake resolvers and never hits a network
 ruff check .
 mypy src
 ```
+
+`main` is protected: changes go through a pull request with a code-owner review,
+and CI must pass on Python 3.10-3.13. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 
