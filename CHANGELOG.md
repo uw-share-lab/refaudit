@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.4.6
+
+### Changed
+
+- **Removed a piece of XML hardening that never ran.** The standard-library
+  fallback in `xmlsafe` tried to wire expat's entity handlers to reject
+  declarations, reaching them through `XMLParser.parser`. CPython no longer
+  exposes that attribute, so the whole block sat behind
+  `if expat is not None` on a value that is always None. It looked like a
+  defence and had never once executed.
+
+  Nothing is weaker for its absence. The refusal was already done by a scan for
+  any DTD or entity declaration, which runs *before* the document reaches a
+  parser at all and so cannot depend on parser internals -- there is now a test
+  that proves this by making `XMLParser` itself raise and watching the refusal
+  happen anyway. That scan is also stricter than what the handlers would have
+  given: it refuses every DTD, where defusedxml permits harmless internal
+  entities.
+
+  `test_element_tree_exposes_no_expat_parser` pins the assumption. If a future
+  Python brings the attribute back, it fails, and the decision gets revisited
+  rather than quietly forgotten.
+
+  Dead security code is worse than none: it advertises a protection that is not
+  there, and the next person to read it has to work out for themselves that it
+  never runs. `xmlsafe.py` goes from 27 statements at 63% coverage to 12 at
+  100%.
+
+325 tests, 93% coverage.
+
+
 ## 0.4.5
 
 ### Added

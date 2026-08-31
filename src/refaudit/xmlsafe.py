@@ -11,11 +11,11 @@ Order of preference:
 
 1. ``defusedxml`` if it happens to be installed, since it is the maintained
    answer to this problem.
-2. Otherwise the standard-library parser with expat's entity handlers wired to
-   refuse any entity declaration outright.
+2. Otherwise the standard-library parser, with any document that declares a DTD
+   or an entity refused before it is parsed at all.
 
-Refusing entity declarations is stricter than defusedxml's default (which
-permits harmless internal entities), and that is the right trade here: Atom
+Refusing entity declarations outright is stricter than defusedxml's default,
+which permits harmless internal ones, and that is the right trade here: Atom
 responses from arXiv contain none, so anything that does is a reason to stop.
 """
 
@@ -49,37 +49,24 @@ try:  # pragma: no cover - exercised only where defusedxml is installed
 
 except ImportError:
 
-    def _forbid(*args: object, **kwargs: object) -> None:
-        raise XmlSecurityError("XML entity declarations are not accepted")
-
     _DOCTYPE = _re.compile(r"<!\s*(DOCTYPE|ENTITY)\b", _re.IGNORECASE)
 
     def fromstring(text: str):
-        # Refuse before parsing. Wiring expat's entity handlers after
-        # ElementTree has built its parser proved unreliable across CPython
-        # builds -- the handlers were silently not applied -- so the check that
-        # actually holds is a scan for any DTD or entity declaration. Atom feeds
-        # from these APIs contain neither, so this rejects nothing legitimate.
+        # Refuse before parsing, rather than by configuring the parser.
+        #
+        # The obvious approach is to wire expat's entity handlers to reject
+        # declarations, but they can only be reached through
+        # ``XMLParser.parser``, which CPython no longer exposes. Code that
+        # tried sat behind ``if expat is not None`` on a value that is always
+        # None -- it looked like a defence and was never once executed. It has
+        # been removed; ``test_element_tree_exposes_no_expat_parser`` fails if
+        # a future Python ever brings the attribute back.
+        #
+        # So this scan is the whole defence, and it is a stronger one: it acts
+        # before the document reaches a parser at all, and refuses any DTD or
+        # entity declaration outright rather than permitting the harmless ones.
+        # Atom feeds from these APIs contain neither, so nothing legitimate is
+        # rejected.
         if _DOCTYPE.search(text):
             raise XmlSecurityError("document declares a DTD or entity; refused")
-        parser = _ET.XMLParser()
-        expat = getattr(parser, "parser", None)
-        if expat is not None:
-            # Any of these firing means the document is trying something we do
-            # not need and will not do.
-            for handler in (
-                "EntityDeclHandler",
-                "UnparsedEntityDeclHandler",
-                "ExternalEntityRefHandler",
-                "NotationDeclHandler",
-            ):
-                try:
-                    setattr(expat, handler, _forbid)
-                except (AttributeError, TypeError):  # handler absent on this build
-                    pass
-            try:
-                expat.DefaultHandlerExpand = None
-            except (AttributeError, TypeError):
-                pass
-        parser.feed(text)
-        return parser.close()
+        return _ET.fromstring(text)
