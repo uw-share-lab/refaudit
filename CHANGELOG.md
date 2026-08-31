@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.3.0
+
+Robustness pass: no single source is load-bearing any more, and the same work
+cited twice is now caught.
+
+### Added
+
+- **Three more sources, so no service is a single point of failure.**
+  `doi:content` negotiates metadata via `doi.org` and therefore works for *any*
+  registration agency, including ones we do not query directly. `dblp` is
+  hand-curated for computer science, free and unmetered, and usually returns the
+  DOI as well. `openlibrary` covers monographs, which no article index holds.
+  A full run with OpenAlex removed entirely now resolves *more* entries than
+  0.2.0 did with it.
+- **Duplicate detection.** The same work under two keys is invisible per-entry —
+  both copies resolve and report `OK`. Matching on DOI, arXiv ID (including the
+  arXiv DOI form of the same ID) and near-identical titles found two real
+  duplicates in the bibliography that prompted it. Runs offline, so it works
+  when every network source is refusing us. `--no-duplicates` opts out.
+- **`--workers`** checks entries in parallel, about 3x faster on a 124-entry
+  bibliography. Politeness does not depend on it: each service keeps its own
+  token bucket, shared across threads.
+
+### Fixed
+
+- **A weak title hit no longer ends the search.** The first index to return
+  anything at all masked better answers from the next — a real book stayed
+  `NOT_FOUND` behind an empty Crossref candidate. Title searches now yield to a
+  better match; identifier lookups still stop the search, because an identifier
+  resolving to a different paper *is* the finding.
+- **`Cache` was not thread-safe.** `flush()` runs periodically during a run, so
+  under `--workers` it serialised a dict other threads were writing to.
+- Open Library is no longer restricted by entry type — monographs are routinely
+  filed as `@article`, which left real books reported as missing — and its year
+  is not used as evidence, since it reports the earliest edition rather than the
+  work being cited.
+
+
 ## 0.2.0
 
 Found by running 0.1.0 against a real 124-entry bibliography.
