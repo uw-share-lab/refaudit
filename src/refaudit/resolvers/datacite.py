@@ -58,6 +58,7 @@ class DataCiteDoi(HttpResolver):
     """Authoritative lookup by DOI for DataCite-registered work."""
 
     name = "datacite:doi"
+    api_base = API
     rate = RateSpec(
         per_second=2.0,
         burst=2.0,

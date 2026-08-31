@@ -59,6 +59,7 @@ class Dblp(HttpResolver):
     """Title lookup against the curated CS bibliography."""
 
     name = "dblp"
+    api_base = API
     rate = RateSpec(
         per_second=1.0,
         burst=1.0,

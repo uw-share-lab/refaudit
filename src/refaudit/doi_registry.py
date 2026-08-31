@@ -36,6 +36,7 @@ class DoiExistence(HttpResolver):
     """
 
     name = "doi.org"
+    api_base = API
     rate = RateSpec(
         per_second=5.0,
         burst=5.0,

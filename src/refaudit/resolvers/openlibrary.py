@@ -45,6 +45,7 @@ class OpenLibrary(HttpResolver):
     """Book lookup by title, for entries no article index will ever hold."""
 
     name = "openlibrary"
+    api_base = API
     # Open Library reports the earliest edition it knows about, which for a
     # reissued or self-published book is years from the edition being cited.
     # Comparing that against the bibliography would manufacture findings.

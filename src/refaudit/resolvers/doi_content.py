@@ -69,6 +69,7 @@ class DoiContentNegotiation(HttpResolver):
     """Agency-agnostic DOI metadata, via the DOI proxy."""
 
     name = "doi:content"
+    api_base = API
     rate = RateSpec(
         per_second=2.0,
         burst=2.0,

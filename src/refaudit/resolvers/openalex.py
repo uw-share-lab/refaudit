@@ -47,6 +47,7 @@ class OpenAlex(HttpResolver):
     """Resolve by DOI, then arXiv id, then title."""
 
     name = "openalex"
+    api_base = API
     rate = RateSpec(
         per_second=3.0,
         burst=3.0,

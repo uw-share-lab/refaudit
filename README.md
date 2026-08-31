@@ -185,6 +185,13 @@ a transient failure does not become a false `UNVERIFIED` and simultaneous
 retries do not synchronise into a thundering herd. A definitive `4xx` is never
 retried — it is an answer, not a failure.
 
+Limits are held **per host, not per resolver**: two resolvers calling
+`api.crossref.org` are still one caller as far as Crossref is concerned, so they
+share a single bucket and the most cautious rate either declares. The same
+applies to the circuit breaker — when a host starts refusing us, every resolver
+that calls it backs off together. Raising `--workers` does not raise any of
+this: threads queue on the same buckets.
+
 A `429` is treated as instruction rather than noise: `Retry-After` is honoured,
 the token bucket is permanently halved, and after repeated refusals a circuit
 breaker stops asking that host so the rest of the run still finishes. Retries use

@@ -28,6 +28,7 @@ _ATOM = "{http://www.w3.org/2005/Atom}"
 
 class ArxivId(HttpResolver):
     name = "arxiv:id"
+    api_base = API
     rate = RateSpec(
         per_second=1.0 / 3.0,
         burst=1.0,
