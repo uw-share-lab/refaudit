@@ -1,0 +1,112 @@
+"""OpenAlex API.
+
+Docs: https://docs.openalex.org/how-to-use-the-api/rate-limits-and-authentication
+
+OpenAlex allows 100,000 calls per day and up to 10 per second, and asks callers
+to join the "polite pool" by supplying a ``mailto``. It indexes both DOIs and
+arXiv identifiers, which makes it the useful third option when arXiv itself is
+refusing a network -- the situation this package was written in response to.
+
+We stay well under the published ceiling: this is a background job run before a
+submission deadline, not something that needs to finish in seconds.
+"""
+
+from __future__ import annotations
+
+import urllib.parse
+from typing import Any, Optional
+
+from ..http import HttpError, TransportError
+from ..models import Entry, Found, NotFound, Outcome, Record, Unavailable
+from ..normalize import clean_arxiv_id, clean_doi
+from .base import HttpResolver, RateSpec
+
+API = "https://api.openalex.org/works"
+
+
+def _record(work: dict[str, Any]) -> Record:
+    authorships = work.get("authorships") or []
+    surname = ""
+    if authorships:
+        name = ((authorships[0].get("author") or {}).get("display_name") or "").strip()
+        if name:
+            surname = name.split()[-1]
+    doi = (work.get("doi") or "").replace("https://doi.org/", "").lower()
+    year: Optional[int] = work.get("publication_year")
+    return Record(
+        source="openalex",
+        title=(work.get("display_name") or work.get("title") or "").strip(),
+        year=int(year) if isinstance(year, int) else None,
+        first_author_surname=surname,
+        doi=doi,
+        url=work.get("id", ""),
+    )
+
+
+class OpenAlex(HttpResolver):
+    """Resolve by DOI, then arXiv id, then title."""
+
+    name = "openalex"
+    rate = RateSpec(
+        per_second=3.0,
+        burst=3.0,
+        rationale="OpenAlex documents 10 req/s and 100k/day for the polite pool; "
+                  "we use a third of the rate ceiling for a background job.",
+    )
+
+    _SELECT = "id,doi,display_name,title,publication_year,authorships"
+
+    def can_handle(self, entry: Entry) -> bool:
+        return bool(clean_doi(entry.doi) or clean_arxiv_id(entry.arxiv_id) or entry.title.strip())
+
+    def _get_json(self, url: str) -> tuple[Optional[dict[str, Any]], Optional[Outcome]]:
+        try:
+            return self.http.get(url).json(), None
+        except HttpError as e:
+            if e.status == 404:
+                return None, NotFound(self.name, "not in OpenAlex")
+            return None, Unavailable(self.name, str(e), e.retry_after)
+        except (TransportError, ValueError) as e:
+            return None, Unavailable(self.name, str(e))
+
+    def resolve(self, entry: Entry) -> Outcome:
+        mailto = urllib.parse.urlencode({"mailto": self.contact_email})
+
+        doi = clean_doi(entry.doi)
+        if doi:
+            url = f"{API}/https://doi.org/{urllib.parse.quote(doi, safe='/')}?{mailto}"
+            data, problem = self._get_json(url)
+            if data:
+                return Found(_record(data))
+            if isinstance(problem, Unavailable):
+                return problem
+            # a 404 on the DOI is meaningful; fall through to other routes
+
+        arx = clean_arxiv_id(entry.arxiv_id)
+        if arx:
+            q = urllib.parse.urlencode(
+                {"filter": f"locations.landing_page_url:https://arxiv.org/abs/{arx}",
+                 "select": self._SELECT, "per-page": 1, "mailto": self.contact_email}
+            )
+            data, problem = self._get_json(f"{API}?{q}")
+            if data and (data.get("results") or []):
+                return Found(_record(data["results"][0]))
+            if isinstance(problem, Unavailable):
+                return problem
+
+        title = entry.title.strip()
+        if title:
+            q = urllib.parse.urlencode(
+                {"filter": f"title.search:{title[:200]}",
+                 "select": self._SELECT, "per-page": 1, "mailto": self.contact_email}
+            )
+            data, problem = self._get_json(f"{API}?{q}")
+            if data:
+                results = data.get("results") or []
+                if results:
+                    return Found(_record(results[0]))
+                return NotFound(self.name, "no title match")
+            if isinstance(problem, Unavailable):
+                return problem
+
+        return NotFound(self.name, "nothing to query with")

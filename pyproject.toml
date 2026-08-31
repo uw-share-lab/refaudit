@@ -1,0 +1,48 @@
+[build-system]
+requires = ["hatchling>=1.20"]
+build-backend = "hatchling.build"
+
+[project]
+name = "refcheck"
+version = "0.1.0"
+description = "Verify bibliography entries against Crossref, arXiv and OpenAlex before you submit."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+keywords = ["bibtex", "citations", "crossref", "openalex", "arxiv", "research-integrity"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Intended Audience :: Science/Research",
+  "Topic :: Text Processing :: Markup :: LaTeX",
+]
+# No runtime dependencies on purpose: this gets installed in a hurry, close to a
+# deadline, often on a machine someone else administers. defusedxml is used if
+# present but a hardened stdlib parser is built in.
+dependencies = []
+
+[project.optional-dependencies]
+xml = ["defusedxml>=0.7"]
+dev = ["pytest>=7", "mypy>=1.5", "ruff>=0.4"]
+
+[project.scripts]
+refcheck = "refcheck.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/uw-share-lab/refcheck"
+Issues = "https://github.com/uw-share-lab/refcheck/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/refcheck"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+disallow_untyped_defs = false
