@@ -69,10 +69,29 @@ def test_unavailable_result_is_not_cached(tmp_path):
 
 # --- real findings ---------------------------------------------------------
 
-def test_doi_not_registered_is_dead_doi():
-    c = Checker([Fake("crossref:doi", NotFound("crossref", "not registered"))])
+class FakeExistence:
+    """Stands in for the DOI proxy. ``None`` means "could not determine"."""
+
+    def __init__(self, answer):
+        self.answer = answer
+
+    def exists(self, doi):
+        return self.answer
+
+
+def test_doi_not_registered_anywhere_is_dead_doi():
+    c = Checker([Fake("crossref:doi", NotFound("crossref", "not registered"))],
+                doi_existence=FakeExistence(False))
     r = c.check(entry(doi="10.1145/0000000.0000000"))
     assert r.verdict is Verdict.DEAD_DOI and r.verdict.is_finding
+
+
+def test_doi_missing_from_one_agency_is_not_dead():
+    """Crossref does not register arXiv DOIs; a 404 there proves nothing."""
+    c = Checker([Fake("crossref:doi", NotFound("crossref", "not registered"))],
+                doi_existence=FakeExistence(True))
+    r = c.check(entry(doi="10.48550/arXiv.2502.14052"))
+    assert r.verdict is Verdict.UNVERIFIED and not r.verdict.is_finding
 
 
 def test_identifier_resolving_to_another_paper_is_title_mismatch():
@@ -163,3 +182,28 @@ def test_weak_title_hit_on_a_dataset_is_skipped_not_a_finding():
     r = c.check(e)
     assert r.verdict is Verdict.SKIPPED
     assert not r.verdict.is_finding
+
+
+def test_thesis_without_identifier_is_skipped_not_missing():
+    """Universities rarely register DOIs; absence from Crossref proves nothing."""
+    c = Checker([Fake("crossref:title", NotFound("crossref:title", "no candidates"))])
+    e = Entry(key="t", entry_type="phdthesis",
+              fields={"title": "Human-AI Interaction in the Presence of Ambiguity",
+                      "year": "2020", "author": "Schaekermann, Mike"})
+    r = c.check(e)
+    assert r.verdict is Verdict.SKIPPED and not r.verdict.is_finding
+
+
+def test_thesis_with_a_doi_is_still_checked():
+    """Opting a type out of "not found" must not opt it out of verification."""
+    c = Checker([Fake("crossref:doi", Found(Record(source="crossref",
+                                                   title="Something Else Entirely",
+                                                   year=2020,
+                                                   first_author_surname="Schaekermann",
+                                                   doi="10.1000/x", url="")))],
+                doi_existence=FakeExistence(True))
+    e = Entry(key="t", entry_type="phdthesis",
+              fields={"title": "Human-AI Interaction in the Presence of Ambiguity",
+                      "year": "2020", "author": "Schaekermann, Mike",
+                      "doi": "10.1000/x"})
+    assert c.check(e).verdict is Verdict.TITLE_MISMATCH

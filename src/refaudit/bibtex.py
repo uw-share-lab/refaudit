@@ -20,7 +20,14 @@ _ENTRY_START = re.compile(r"@(?P<type>\w+)\s*[{(]\s*(?P<key>[^,\s{}]+)\s*,", re.
 _FIELD = re.compile(r"(\w+)\s*=\s*", re.MULTILINE)
 
 # Entry types that are not published records and have no external index.
-NON_ARCHIVAL_TYPES = frozenset({"misc", "online", "manual", "unpublished", "software"})
+#: Entry types that the citation indexes do not undertake to cover. With no
+#: identifier to look up, "not found" would mean "we looked somewhere it was
+#: never going to be", so these are reported as skipped instead. Theses belong
+#: here: universities rarely register DOIs for them.
+NON_ARCHIVAL_TYPES = frozenset({
+    "misc", "online", "manual", "unpublished", "software",
+    "phdthesis", "mastersthesis",
+})
 
 
 def _match_brace(src: str, open_idx: int) -> int:

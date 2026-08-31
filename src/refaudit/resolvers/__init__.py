@@ -2,7 +2,9 @@
 
 Order matters: identifier-based resolvers run before title search, so a strong
 signal is used when one exists and a weak one only when nothing better is
-available.
+available. DOI lookups are spread across registration agencies -- Crossref for
+most published literature, DataCite for preprints and deposits -- because
+neither one alone can speak for the whole DOI system.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ from __future__ import annotations
 from .arxiv import ArxivId
 from .base import HttpResolver, RateSpec, Resolver
 from .crossref import CrossrefDoi, CrossrefTitle
+from .datacite import DataCiteDoi
 from .openalex import OpenAlex
 
 __all__ = [
@@ -17,6 +20,7 @@ __all__ = [
     "ArxivId",
     "CrossrefDoi",
     "CrossrefTitle",
+    "DataCiteDoi",
     "HttpResolver",
     "OpenAlex",
     "RateSpec",
@@ -26,6 +30,7 @@ __all__ = [
 
 AVAILABLE = {
     "crossref:doi": CrossrefDoi,
+    "datacite:doi": DataCiteDoi,
     "arxiv:id": ArxivId,
     "openalex": OpenAlex,
     "crossref:title": CrossrefTitle,
