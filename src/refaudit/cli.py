@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import logging
 import os
 import sys
 from pathlib import Path
@@ -28,6 +29,32 @@ exit status:
   1  at least one entry needs a human look
   2  usage or input error
 """
+
+
+#: Marks the handler we own, so repeated calls replace it rather than stacking
+#: another copy of every line on top of the last.
+_HANDLER_TAG = "refaudit-cli"
+
+
+def configure_logging(verbose: bool = False) -> None:
+    """Point the package logger at stderr.
+
+    Only the CLI calls this. Importing refaudit as a library leaves logging
+    entirely to the host application, which is why the package itself installs
+    nothing but a NullHandler.
+
+    Reports go to stdout and diagnostics to stderr, so ``refaudit ... > out.txt``
+    still shows you what the network is doing.
+    """
+    log = logging.getLogger("refaudit")
+    for existing in [h for h in log.handlers if getattr(h, "name", None) == _HANDLER_TAG]:
+        log.removeHandler(existing)
+
+    handler = logging.StreamHandler(sys.stderr)
+    handler.name = _HANDLER_TAG
+    handler.setFormatter(logging.Formatter("%(levelname)-8s %(message)s"))
+    log.addHandler(handler)
+    log.setLevel(logging.DEBUG if verbose else logging.WARNING)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -63,12 +90,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--no-duplicates", action="store_true",
                    help="skip the offline duplicate-entry pass")
     p.add_argument("--quiet", action="store_true", help="only print the summary")
+    p.add_argument("-v", "--verbose", action="store_true",
+                   help="log every request, retry and rate-limit change to stderr. "
+                        "Use this when entries come back UNVERIFIED and you want "
+                        "to see which service was unreachable and why")
     p.add_argument("--version", action="version", version=f"refaudit {__version__}")
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    configure_logging(verbose=args.verbose)
 
     if not args.bib.is_file():
         print(f"error: no such file: {args.bib}", file=sys.stderr)

@@ -1,5 +1,81 @@
 # Changelog
 
+## 0.4.0
+
+### Added
+
+- **`-v` / `--verbose`, and a real logger.** The package now logs through the
+  standard `logging` module under the `refaudit` name: one `DEBUG` line per
+  request, and `WARNING` for the things worth acting on -- rate-limit penalties,
+  retries, and a circuit breaker giving up on a host. Previously the only output
+  was a progress line per entry, so a run that came back with forty `UNVERIFIED`
+  entries gave you no way to see which service had refused you or why; the reason
+  was captured inside an `Unavailable` and went nowhere. Diagnostics go to stderr,
+  the report to stdout, so `refaudit ... -v 2> refaudit.log` separates them.
+
+  Importing refaudit as a library still configures nothing and prints nothing --
+  it installs a `NullHandler` and leaves level and destination to the host
+  application.
+
+- **`py.typed`.** The package has always been typed and checked with mypy, but
+  shipped no PEP 561 marker, so downstream users got none of it.
+
+### Fixed
+
+- **A throttled run can now speed back up.** The token bucket could only ever
+  slow down: every `429` halved it and nothing ever raised it again. A burst of
+  refusals early in a run -- roughly six halvings before the circuit breaker
+  intervenes -- left Crossref's 2/s at about 0.03/s, and the remaining entries
+  crawled at that pace for the rest of the process. On a few hundred references
+  that is hours, and it looks like a hang rather than a slowdown.
+
+  Decrease stays multiplicative, because that is what makes backoff safe, but it
+  is now a penalty the run works off: each success edges the rate back toward the
+  host's ceiling by a twentieth, and a penalty never drops below a sixteenth of
+  it. Rates a service publishes in its own headers are treated as a ceiling
+  rather than a dip, so recovery never climbs past what the service asked for.
+
+- **Redirects are paced.** The token bucket was drawn from once per attempt, but
+  an attempt could follow up to three redirect hops before returning, so a
+  redirecting endpoint sent four requests on the strength of one token and
+  briefly ran at four times the documented rate. Every hop now pays the bucket,
+  because every hop is a real request to a real server.
+
+- **A retry now re-requests the URL that was asked for.** The redirect target
+  was carried across attempts, so once a hop had been followed every later
+  attempt started from wherever the redirect had pointed -- and if that redirect
+  was itself transient, a load balancer bouncing us or a maintenance page, the
+  thing actually wanted was never requested again. It also handed each attempt a
+  fresh hop budget, so a chain could walk `max_attempts x MAX_REDIRECTS` hops
+  from the original URL rather than `MAX_REDIRECTS`, weakening the bound that
+  keeps a redirect from taking us -- and the `mailto` identifier we send --
+  somewhere unexpected.
+
+- **A redirect chain we cannot follow is now a definitive answer.** Exhausting
+  the hop limit raised a `302`, which is not a `4xx`, so it fell through to the
+  retry branch: four attempts re-walked the identical chain for sixteen requests
+  where four would do, and four `record_failure` calls opened the circuit
+  breaker on a host that had answered every single time. Because the breaker is
+  shared per host, that backed off every resolver calling it. It now raises
+  `TooManyRedirects` -- a `TransportError` subclass, so resolvers still report
+  `Unavailable` and the entry stays `UNVERIFIED` rather than becoming a finding
+  -- and is neither retried nor counted against the host. This also removes a
+  line of genuinely unreachable code (`raise TransportError("too many
+  redirects")`), which the hop loop could never arrive at.
+
+- **Two runs sharing a cache file no longer erase each other.** `flush()` wrote
+  the whole cache from memory loaded at startup, so of two runs in the same
+  directory -- two terminals, a shared lab machine, a cluster job array -- the
+  second to finish replaced the first one's entries with its own. Writes were
+  always atomic, so nothing ever corrupted; the entries simply vanished and got
+  re-fetched from services we are trying to be polite to. Flush now merges what
+  is on disk, with the newer timestamp winning a conflict.
+
+- **Corrected the rate-limit table in the README**, which listed DataCite and
+  doi.org twice with conflicting figures and gave doi.org as 5/s. Every rate
+  there now matches the `RateSpec` the code declares. doi.org is 2/s.
+
+
 ## 0.3.2
 
 ### Fixed

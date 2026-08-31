@@ -93,6 +93,7 @@ error — so it drops into CI or a pre-submission script.
 | `--workers` | entries checked in parallel (default 4). Each service keeps its own rate limit regardless |
 | `--no-duplicates` | skip the offline duplicate-entry pass |
 | `--quiet` | suppress per-entry progress, print only the summary |
+| `-v`, `--verbose` | log every request, retry and rate-limit change to stderr |
 
 A run over a few hundred references takes minutes, because it is deliberately
 paced. Successful lookups are cached, so it is safe to interrupt with Ctrl-C and
@@ -178,16 +179,16 @@ that calls it:
 | arXiv | 1 per 3s | [arXiv's terms of use](https://info.arxiv.org/help/api/tou.html) specify exactly this |
 | DBLP | 1/s | a small academic service that asks callers not to hammer it |
 | Open Library | 1/s | donation-funded; asks for a descriptive User-Agent and modest rates |
-| DataCite | 2/s | [asks for reasonable use](https://support.datacite.org/docs/api); matched to our Crossref pace |
-| doi.org | 2–5/s | the proxy redirects to the owning agency, so each call costs a third party a real request |
-| OpenAlex | 3/s | [documented](https://docs.openalex.org/how-to-use-the-api/rate-limits-and-authentication) ceiling is 10/s and 100k/day; we use a third of it |
 | DataCite | 2/s | [asks for reasonable use](https://support.datacite.org/docs/api) and throttles heavy callers; matched to our Crossref pace |
-| doi.org | 5/s | a lightweight proxy lookup, consulted only for DOIs no agency resolved |
+| doi.org | 2/s | the proxy redirects to the owning agency, so each call costs a third party a real request |
+| OpenAlex | 3/s | [documented](https://docs.openalex.org/how-to-use-the-api/rate-limits-and-authentication) ceiling is 10/s and 100k/day; we use a third of it |
 
 Requests retry up to four times with exponential backoff and **full jitter**, so
 a transient failure does not become a false `UNVERIFIED` and simultaneous
 retries do not synchronise into a thundering herd. A definitive `4xx` is never
-retried — it is an answer, not a failure.
+retried — it is an answer, not a failure. Every request sent is paced, retries
+and redirect hops included: a redirect is a real request to a real server, so it
+costs the same as any other.
 
 Limits are held **per host, not per resolver**: two resolvers calling
 `api.crossref.org` are still one caller as far as Crossref is concerned, so they
@@ -197,12 +198,33 @@ that calls it backs off together. Raising `--workers` does not raise any of
 this: threads queue on the same buckets.
 
 A `429` is treated as instruction rather than noise: `Retry-After` is honoured,
-the token bucket is permanently halved, and after repeated refusals a circuit
-breaker stops asking that host so the rest of the run still finishes. Retries use
-exponential backoff with full jitter.
+the token bucket is halved, and after repeated refusals a circuit breaker stops
+asking that host so the rest of the run still finishes. Retries use exponential
+backoff with full jitter.
+
+The halving is a penalty the run can work off. Each success afterwards edges the
+rate back up by a twentieth of the host's ceiling, and a penalty never takes it
+below a sixteenth of that ceiling. Decrease is multiplicative and recovery is
+additive — quick to yield, slow to re-probe — so a burst of refusals early on
+costs you seconds rather than leaving the remaining few hundred entries crawling
+for the rest of the run. Rates a *service* publishes are different: those are a
+ceiling, and recovery never climbs past one.
 
 `--email` is required because Crossref and OpenAlex give identified callers a
 separate, more reliable pool, and it is the courtesy their docs ask for.
+
+### Several people running it at once
+
+Pacing is per process, and that is the right scope. Everyone runs under their own
+`--email`, so each of you is a separate identified caller with your own allowance,
+your own backoff and your own circuit breaker — one person hitting a 429 does not
+slow anybody else down, and no amount of parallel use by a lab gets an individual
+blocked. There is nothing to coordinate and no shared limit to configure.
+
+Two runs *in the same directory* do share one thing: the cache file. That is
+safe — writes are atomic and each flush merges what is already on disk rather
+than overwriting it, so neither run loses the other's entries. If you would
+rather keep them entirely separate, give each one its own `--out`.
 
 ## Security
 
@@ -247,6 +269,20 @@ paper. Usually the identifier was copied from the wrong row, or generated rather
 than looked up. Check the `found` line in the report against what you meant to
 cite.
 
+**You want to see what it is actually doing.** Add `-v`. Every request, retry,
+rate-limit change and circuit-breaker trip goes to stderr, which is the fastest
+way to tell a slow network apart from a service that is refusing you:
+
+```bash
+refaudit refs.bib --email you@uwaterloo.ca -v
+```
+
+Diagnostics go to stderr and the report to stdout, so you can keep them apart:
+
+```bash
+refaudit refs.bib --email you@uwaterloo.ca -v 2> refaudit.log
+```
+
 **Everything is `SKIPPED`.** `@misc` and `@online` entries with no identifier
 cannot be checked. That is expected for datasets, blog posts and software.
 
@@ -276,6 +312,19 @@ for result in checker.check_all(entries):
 
 `Resolver` is a `Protocol`: implement `name`, `rate`, `can_handle` and `resolve`
 to add a source, and pass it to `Checker` alongside the built-ins.
+
+Importing refaudit configures no logging and prints nothing — it attaches only a
+`NullHandler`, so level and destination stay your application's decision. To see
+what the network is doing, handle the `refaudit` logger yourself:
+
+```python
+import logging
+logging.basicConfig(level=logging.INFO)
+logging.getLogger("refaudit").setLevel(logging.DEBUG)
+```
+
+`WARNING` carries the things worth acting on — rate-limit penalties, retries and
+circuit-breaker trips. `DEBUG` adds one line per request.
 
 ## Development
 

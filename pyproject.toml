@@ -25,7 +25,7 @@ dependencies = []
 
 [project.optional-dependencies]
 xml = ["defusedxml>=0.7"]
-dev = ["pytest>=7", "mypy>=1.5", "ruff>=0.4", "pdoc>=14"]
+dev = ["pytest>=7", "mypy>=1.5", "ruff>=0.4", "pdoc>=14", "types-defusedxml>=0.7"]
 
 [project.scripts]
 refaudit = "refaudit.cli:main"
@@ -36,6 +36,9 @@ Issues = "https://github.com/uw-share-lab/refaudit/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/refaudit"]
+# Ships the PEP 561 marker so installers of refaudit get its type information
+# instead of mypy treating the whole package as untyped.
+artifacts = ["src/refaudit/py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

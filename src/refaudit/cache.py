@@ -36,16 +36,19 @@ class Cache:
         self._lock = threading.RLock()
         self._load()
 
-    def _load(self) -> None:
-        if not self.path.exists():
-            return
+    def _read_file(self) -> dict[str, dict[str, Any]]:
+        """Entries currently on disk, or none if the file is absent or unusable."""
         try:
             blob = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
-            return  # corrupt or unreadable: start clean rather than crash
+            return {}  # corrupt or unreadable: start clean rather than crash
         if blob.get("schema") != SCHEMA_VERSION:
-            return
-        self._data = blob.get("entries", {})
+            return {}
+        entries = blob.get("entries")
+        return entries if isinstance(entries, dict) else {}
+
+    def _load(self) -> None:
+        self._data = self._read_file()
 
     def get(self, key: str) -> dict[str, Any] | None:
         with self._lock:
@@ -64,16 +67,34 @@ class Cache:
             self._dirty = True
 
     def flush(self) -> None:
-        # Serialise under the lock: flush() is called periodically during a run,
+        # Snapshot under the lock: flush() is called periodically during a run,
         # while worker threads are still writing results. Without this,
         # json.dumps walks a dict another thread is mutating.
         with self._lock:
             if not self._dirty:
                 return
-            payload = json.dumps(
-                {"schema": SCHEMA_VERSION, "entries": self._data}, ensure_ascii=False
-            )
+            mine = dict(self._data)
             self._dirty = False
+
+        # Merge rather than overwrite. Two people running in the same directory
+        # -- or two terminals, or a cluster job array -- share this file, and a
+        # wholesale write would replace whatever the other run had finished with
+        # only what this one happens to hold. Entries are independent, so the
+        # union is always the better answer, and the newer timestamp wins a tie.
+        #
+        # This narrows the losing window to the moment between reading and
+        # replacing rather than closing it: a lost entry costs a repeated lookup
+        # on the next run, never a wrong result, which does not justify making
+        # every install depend on file locking that differs per platform.
+        merged = self._read_file()
+        for key, item in mine.items():
+            existing = merged.get(key)
+            if existing is None or item.get("stored_at", 0) >= existing.get("stored_at", 0):
+                merged[key] = item
+
+        payload = json.dumps(
+            {"schema": SCHEMA_VERSION, "entries": merged}, ensure_ascii=False
+        )
         self.path.parent.mkdir(parents=True, exist_ok=True)
         fd, tmp = tempfile.mkstemp(dir=str(self.path.parent), suffix=".tmp")
         try:
