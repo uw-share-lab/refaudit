@@ -48,3 +48,31 @@ exist because both failure modes happened during development.
 The `release` workflow builds and publishes to PyPI using Trusted Publishing.
 There is no API token in this repository; PyPI verifies the workflow's identity
 over OIDC, so there is no long-lived credential to leak.
+
+### Repository settings the release depends on
+
+These live in GitHub's settings rather than in this repo, so they are recorded
+here — if you fork this, recreate the repository, or wonder why a release was
+rejected, start with these.
+
+**`pypi` environment → deployment branch policy must allow the `v*` tag.**
+A release workflow is triggered by a tag, not a branch. An environment
+restricted to "protected branches only" therefore rejects every release with
+`Tag "vX.Y.Z" is not allowed to deploy to pypi due to environment protection
+rules`. The policy is set to custom rules with a single `v*` tag pattern:
+
+```bash
+gh api -X PUT repos/uw-share-lab/refaudit/environments/pypi \
+  -f 'deployment_branch_policy[protected_branches]=false' \
+  -f 'deployment_branch_policy[custom_branch_policies]=true'
+gh api -X POST repos/uw-share-lab/refaudit/environments/pypi/deployment-branch-policies \
+  -f name='v*' -f type=tag
+```
+
+**PyPI trusted publisher.** Registered against project `refaudit`, owner
+`uw-share-lab`, repository `refaudit`, workflow `release.yml`, environment
+`pypi`. All five must match exactly or PyPI refuses the upload.
+
+**Branch protection on `main`.** Pull request with one code-owner approval,
+all four CI checks green, linear history, no force-push or delete. Admins can
+bypass, which is intentional; everyone else goes through review.
