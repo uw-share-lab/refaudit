@@ -35,7 +35,22 @@ class Entry:
 
     @property
     def arxiv_id(self) -> str:
-        return self.get("eprint") or self.get("archiveprefix_id")
+        """The arXiv identifier, from its own field or from free text.
+
+        ``eprint`` is the correct place for it, but exports from Google Scholar
+        and similar tools leave it in the journal or note field instead. Those
+        entries are perfectly findable, so refusing to look costs a real check.
+        """
+        from .normalize import clean_arxiv_id, find_arxiv_id
+
+        explicit = self.get("eprint") or self.get("archiveprefix_id")
+        if clean_arxiv_id(explicit):
+            return explicit
+        for field_name in ("journal", "note", "howpublished", "booktitle", "url", "doi"):
+            found = find_arxiv_id(self.get(field_name))
+            if found:
+                return found
+        return explicit
 
     @property
     def year(self) -> int | None:

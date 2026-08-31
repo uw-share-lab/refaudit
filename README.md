@@ -66,6 +66,10 @@ refaudit sample-base.bib --email you@uwaterloo.ca --tex sections/ --only-cited
 | `AUTHOR_MISMATCH` | titles agree, first author does not |
 | `YEAR_MISMATCH` | titles agree, year is off by more than one |
 | `NOT_FOUND` | no identifier, and no title match anywhere |
+
+An arXiv identifier counts wherever the entry keeps it: `eprint`, or free text
+such as `journal={arXiv preprint arXiv:2506.08872}`, which is what Google
+Scholar exports look like.
 | `UNVERIFIED` | **not checked — a source was unreachable, or the DOI is real but unindexed. Says nothing about the entry** |
 | `SKIPPED` | `@misc`/`@online`/`@phdthesis` and similar with no identifier; nothing to check against |
 | `OK` | resolved and consistent |

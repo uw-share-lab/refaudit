@@ -6,4 +6,4 @@ value. A hardcoded User-Agent silently misreports us to the people whose rate
 limits we are trying to respect.
 """
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
