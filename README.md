@@ -174,6 +174,17 @@ cite.
 **Everything is `SKIPPED`.** `@misc` and `@online` entries with no identifier
 cannot be checked. That is expected for datasets, blog posts and software.
 
+## API reference
+
+Generated from the docstrings and published on every push to `main`:
+**https://uw-share-lab.github.io/refaudit/refaudit.html**
+
+Build it locally with `pdoc` (included in the `dev` extra):
+
+```bash
+pdoc refaudit refaudit.checker refaudit.models refaudit.resolvers -o site --docformat google
+```
+
 ## Library use
 
 ```python
@@ -201,6 +212,10 @@ mypy src
 
 `main` is protected: changes go through a pull request with a code-owner review,
 and CI must pass on Python 3.10-3.13. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Repository settings that releases depend on are kept as code in
+[`.github/scripts/configure-repo.sh`](.github/scripts/configure-repo.sh) and are
+safe to re-run.
 
 ## Licence
 

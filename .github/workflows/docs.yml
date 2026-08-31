@@ -1,0 +1,57 @@
+name: docs
+
+# API reference is generated from the docstrings in the source, so it cannot
+# drift from the code the way a hand-written reference does.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e . pdoc
+      # Discover submodules at build time. Naming them by hand would rot as
+      # modules are added, and pdoc will not walk into them on its own because
+      # __init__.py defines __all__.
+      - name: Build API reference
+        run: |
+          MODULES=$(python - <<'EOF'
+          import pkgutil, refaudit
+          names = ["refaudit"] + [
+              m.name for m in pkgutil.walk_packages(refaudit.__path__, "refaudit.")
+              if not m.name.endswith("__main__")
+          ]
+          print(" ".join(names))
+          EOF
+          )
+          echo "documenting: $MODULES"
+          pdoc $MODULES -o site --docformat google
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

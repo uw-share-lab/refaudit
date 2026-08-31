@@ -22,7 +22,7 @@ dependencies = []
 
 [project.optional-dependencies]
 xml = ["defusedxml>=0.7"]
-dev = ["pytest>=7", "mypy>=1.5", "ruff>=0.4"]
+dev = ["pytest>=7", "mypy>=1.5", "ruff>=0.4", "pdoc>=14"]
 
 [project.scripts]
 refaudit = "refaudit.cli:main"
