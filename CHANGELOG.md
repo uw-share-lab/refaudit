@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.4.1
+
+### Fixed
+
+- **A service that asks us to come back in hours is now believed.** Found by
+  running 0.4.0 against the live APIs: OpenAlex answered `429` with
+  `Retry-After: 29895` -- 8.3 hours -- and the client capped its sleep at 60
+  seconds and retried anyway, four times, then repeated the whole thing for
+  every later entry that reached OpenAlex. Roughly three minutes of dead time
+  per entry, spent asking a service that had already said no.
+
+  The circuit breaker could not help, because those 60-second sleeps are longer
+  than its own 120-second cooldown: it half-opened between entries and never
+  engaged, logging zero trips across eight consecutive refusals.
+
+  A `Retry-After` longer than `MAX_RETRY_AFTER` (60s, the same cap a single
+  backoff already used) is now treated as an answer rather than a delay. The
+  request fails immediately and the host is stood down for the period it asked
+  for, capped at an hour, so the rest of the run skips it instead of
+  rediscovering the same refusal. Entries that needed that source come back
+  `UNVERIFIED` -- no verdict rather than a wrong one. In the observed case this
+  turns 12 requests and about nine minutes of sleeping into one request and no
+  waiting.
+
+  `CircuitBreaker` gained `open_for(seconds)` for this, and now tracks when it
+  may next be probed rather than when it opened.
+
+
 ## 0.4.0
 
 ### Added

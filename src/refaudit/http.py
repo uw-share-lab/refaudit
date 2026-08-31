@@ -40,6 +40,17 @@ MAX_BYTES = 5 * 1024 * 1024  # generous for a bibliographic record, bounded all 
 DEFAULT_TIMEOUT = 20.0
 MAX_REDIRECTS = 3
 
+#: The longest ``Retry-After`` we will sit through. Beyond this the wait is not
+#: a delay but an answer -- the service is telling us to come back after this
+#: run has finished -- so we stand the host down instead of sleeping and asking
+#: again. Deliberately the same as the cap on how long a single backoff sleeps.
+MAX_RETRY_AFTER = 60.0
+
+#: However long a service asks for, hold the circuit no longer than this. A run
+#: lasts minutes, so a longer hold buys nothing, and it bounds the damage from
+#: an absurd or malformed header.
+MAX_BREAKER_HOLD = 3600.0
+
 
 class HttpError(Exception):
     def __init__(self, status: int, message: str, retry_after: float | None = None):
@@ -254,6 +265,19 @@ class HttpClient:
                                 host, self.bucket.rate,
                                 f" (Retry-After {e.retry_after:.0f}s)"
                                 if e.retry_after else "")
+                    if e.retry_after is not None and e.retry_after > MAX_RETRY_AFTER:
+                        # Longer than this run will last. Sleeping our capped
+                        # 60s and asking again -- four times, then again for
+                        # every later entry that reaches this host -- is not a
+                        # retry, it is ignoring the answer. Stand the host down
+                        # so the rest of the run skips it immediately; the
+                        # entries it would have served come back UNVERIFIED,
+                        # which is the safe direction.
+                        self.breaker.open_for(min(e.retry_after, MAX_BREAKER_HOLD))
+                        log.warning("%s: asked us to wait %.0fs; standing it down for "
+                                    "the rest of this run. Entries needing it will be "
+                                    "UNVERIFIED, not findings.", host, e.retry_after)
+                        raise
                 if attempt < self.max_attempts - 1:
                     time.sleep(min(delay, 60.0))
                     continue

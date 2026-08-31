@@ -202,6 +202,12 @@ the token bucket is halved, and after repeated refusals a circuit breaker stops
 asking that host so the rest of the run still finishes. Retries use exponential
 backoff with full jitter.
 
+If a `429` carries a `Retry-After` longer than a minute, that is an answer
+rather than a delay: the request fails immediately and the host is stood down
+for the period it asked for, so the rest of the run skips it instead of
+rediscovering the same refusal entry by entry. Anything that source would have
+answered comes back `UNVERIFIED` — no verdict, never a finding.
+
 The halving is a penalty the run can work off. Each success afterwards edges the
 rate back up by a twentieth of the host's ceiling, and a penalty never takes it
 below a sixteenth of that ceiling. Decrease is multiplicative and recovery is

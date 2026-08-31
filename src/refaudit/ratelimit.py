@@ -106,17 +106,19 @@ class CircuitBreaker:
     threshold: int = 4
     cooldown: float = 120.0
     _failures: int = field(default=0, init=False)
-    _opened_at: float | None = field(default=None, init=False)
+    #: When the circuit may next be probed, rather than when it opened, so a
+    #: service that names its own wait can be honoured instead of the default.
+    _open_until: float | None = field(default=None, init=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, init=False)
 
     @property
     def is_open(self) -> bool:
         with self._lock:
-            if self._opened_at is None:
+            if self._open_until is None:
                 return False
-            if time.monotonic() - self._opened_at >= self.cooldown:
+            if time.monotonic() >= self._open_until:
                 # half-open: allow one probe through
-                self._opened_at = None
+                self._open_until = None
                 self._failures = self.threshold - 1
                 return False
             return True
@@ -124,15 +126,28 @@ class CircuitBreaker:
     def record_success(self) -> None:
         with self._lock:
             self._failures = 0
-            self._opened_at = None
+            self._open_until = None
 
     def record_failure(self) -> None:
         with self._lock:
             self._failures += 1
-            if self._failures >= self.threshold and self._opened_at is None:
-                self._opened_at = time.monotonic()
+            if self._failures >= self.threshold and self._open_until is None:
+                self._open_until = time.monotonic() + self.cooldown
+
+    def open_for(self, seconds: float) -> None:
+        """Open the circuit for a period the service itself named.
+
+        Used when a 429 carries a ``Retry-After`` longer than this run is
+        willing to wait. Counting that as one more failure would let the
+        default cooldown expire long before the service is ready, and every
+        later entry would spend its own attempts rediscovering the same
+        refusal.
+        """
+        with self._lock:
+            self._failures = max(self._failures, self.threshold)
+            self._open_until = time.monotonic() + max(seconds, 0.0)
 
     def reset(self) -> None:
         with self._lock:
             self._failures = 0
-            self._opened_at = None
+            self._open_until = None
