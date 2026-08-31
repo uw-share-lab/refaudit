@@ -11,12 +11,19 @@ malformed references and a false entry costs you a desk reject.
         print(result.key, result.verdict.value)
 """
 
+import logging as _logging
+
 from ._version import __version__
 from .bibtex import cited_keys, find_tex, parse_file, parse_string
 from .cache import Cache
 from .checker import Checker, Thresholds
 from .models import CheckResult, Entry, Found, NotFound, Record, Unavailable, Verdict
 from .resolvers import default_resolvers
+
+# A library configures no logging of its own: it attaches a do-nothing handler so
+# that emitting a record is never an error, and leaves level and destination to
+# whatever application imported us. The CLI opts in via cli.configure_logging.
+_logging.getLogger(__name__).addHandler(_logging.NullHandler())
 
 __all__ = [
     "Cache",

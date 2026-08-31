@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import logging
 import random
 import time
 import urllib.error
@@ -32,6 +33,8 @@ from dataclasses import dataclass
 from typing import Any
 
 from .ratelimit import CircuitBreaker, TokenBucket
+
+log = logging.getLogger("refaudit.http")
 
 MAX_BYTES = 5 * 1024 * 1024  # generous for a bibliographic record, bounded all the same
 DEFAULT_TIMEOUT = 20.0
@@ -47,6 +50,16 @@ class HttpError(Exception):
 
 class TransportError(Exception):
     """Network-level failure: DNS, TLS, timeout, connection reset."""
+
+
+class TooManyRedirects(TransportError):
+    """A redirect chain longer than we will follow.
+
+    A ``TransportError`` so resolvers still report it as ``Unavailable`` -- we
+    never reached an answer, which must stay separate from evidence about the
+    entry -- but definitive rather than transient: retrying only re-walks the
+    same hops.
+    """
 
 
 @dataclass
@@ -151,7 +164,10 @@ class HttpClient:
         Raises ``HttpError`` for a definitive HTTP status and ``TransportError``
         for anything that means "we could not reach it".
         """
+        host = urllib.parse.urlsplit(url).netloc or url
         if self.breaker.is_open:
+            log.warning("%s: circuit open after repeated refusals; not asking again "
+                        "until it cools down", host)
             raise TransportError("circuit open for this host (repeated refusals)")
 
         headers = {
@@ -162,48 +178,97 @@ class HttpClient:
         if self._api_key_header:
             headers[self._api_key_header[0]] = self._api_key_header[1]
 
-        current = url
         last_exc: Exception | None = None
 
         for attempt in range(self.max_attempts):
-            self.bucket.acquire()
+            # Every attempt re-requests what the caller asked for. Carrying a
+            # redirect target across attempts pinned each retry to a location
+            # that may itself have been transient -- a load balancer bouncing
+            # us, a maintenance page -- so the thing actually wanted was never
+            # asked for again. It also handed every attempt a fresh hop budget,
+            # quietly multiplying MAX_REDIRECTS by max_attempts and weakening
+            # the bound that keeps a chain from taking us, and the mailto
+            # identifier we send, somewhere unexpected.
+            current = url
             try:
                 for hop in range(MAX_REDIRECTS + 1):
+                    # Per hop, not per attempt. A redirect is a real request to
+                    # a real server; charging the whole chain to one token let a
+                    # redirecting endpoint burst at several times the rate the
+                    # service documents, which is the pace the bucket exists to
+                    # hold us to.
+                    self.bucket.acquire()
+                    log.debug("GET %s (attempt %d/%d, hop %d, %.3g req/s)",
+                              current, attempt + 1, self.max_attempts,
+                              hop + 1, self.bucket.rate)
                     try:
                         resp = self._open_once(current, headers)
                     except HttpError as e:
-                        if e.status in (301, 302, 303, 307, 308) and hop < MAX_REDIRECTS:
-                            loc = str(e).split("redirect to ", 1)[-1]
-                            current = urllib.parse.urljoin(current, loc)
-                            continue
+                        if e.status in (301, 302, 303, 307, 308):
+                            if hop < MAX_REDIRECTS:
+                                loc = str(e).split("redirect to ", 1)[-1]
+                                current = urllib.parse.urljoin(current, loc)
+                                continue
+                            # The host answered every hop; it is the URL that
+                            # goes nowhere. Retrying would re-walk the identical
+                            # chain at four times the cost, and counting it as a
+                            # failure would open the breaker on a healthy host --
+                            # which, being shared per host, would back off every
+                            # resolver that calls it.
+                            self.breaker.record_success()
+                            log.debug("%s: more than %d redirects; giving up on "
+                                      "this URL rather than retrying it",
+                                      host, MAX_REDIRECTS)
+                            raise TooManyRedirects(
+                                f"more than {MAX_REDIRECTS} redirects from {url}"
+                            ) from e
                         raise
                     self.breaker.record_success()
+                    # A success is evidence our current pace is acceptable, so
+                    # give back a little of any earlier penalty.
+                    self.bucket.recover()
                     self._observe_rate_headers(resp.headers)
                     return resp
-                raise TransportError("too many redirects")
 
+            except TooManyRedirects:
+                raise
             except HttpError as e:
                 last_exc = e
                 # 4xx other than 429 is a definitive answer; do not retry it.
                 if e.status != 429 and 400 <= e.status < 500:
+                    # An answer about the entry, not a problem with the run, so
+                    # this stays below warning however loud the run is.
+                    log.debug("%s: HTTP %d -- a definitive answer, not retrying",
+                              host, e.status)
                     self.breaker.record_success()  # the host is healthy, our request wasn't
                     raise
                 self.breaker.record_failure()
                 delay = e.retry_after if e.retry_after is not None else self._backoff(attempt)
                 if e.status == 429:
-                    # The service is telling us our pace is wrong: slow down for good,
-                    # not just for this attempt.
-                    self.bucket.set_rate(self.bucket.rate / 2)
+                    # The service is telling us our pace is wrong. Slow down for
+                    # more than this attempt, but as a penalty we can work off
+                    # again -- a burst of refusals must not throttle the whole
+                    # run to a crawl it never recovers from.
+                    self.bucket.penalise()
+                    log.warning("%s: HTTP 429, slowing to %.3g req/s%s",
+                                host, self.bucket.rate,
+                                f" (Retry-After {e.retry_after:.0f}s)"
+                                if e.retry_after else "")
                 if attempt < self.max_attempts - 1:
                     time.sleep(min(delay, 60.0))
                     continue
+                log.warning("%s: giving up after %d attempts (HTTP %d)",
+                            host, self.max_attempts, e.status)
                 raise
             except TransportError as e:
                 last_exc = e
                 self.breaker.record_failure()
                 if attempt < self.max_attempts - 1:
+                    log.warning("%s: %s; retrying", host, e)
                     time.sleep(self._backoff(attempt))
                     continue
+                log.warning("%s: %s; giving up after %d attempts",
+                            host, e, self.max_attempts)
                 raise
 
         raise last_exc or TransportError("request failed")

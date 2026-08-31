@@ -17,18 +17,35 @@ import threading
 import time
 from dataclasses import dataclass, field
 
+#: A penalty never drops the rate below ``ceiling / FLOOR_DIVISOR``. Without a
+#: floor, repeated halving reaches a rate at which a single request takes
+#: minutes -- indistinguishable from a hang, and never recovered from.
+FLOOR_DIVISOR = 16.0
+
+#: Successes recover the rate by ``ceiling / RECOVERY_STEPS`` each. Additive
+#: increase against multiplicative decrease: quick to yield, slow to re-probe,
+#: which is what keeps a shared service stable.
+RECOVERY_STEPS = 20.0
+
 
 class TokenBucket:
     """Classic token bucket. Thread-safe; ``acquire`` blocks until a token is free.
 
     ``rate`` is tokens per second and ``capacity`` the burst allowance. A service
     documenting "1 request per 3 seconds" is ``rate=1/3, capacity=1``.
+
+    The rate moves between a floor and a *ceiling*. The ceiling is policy -- what
+    the service documents, or what it published in a rate-limit header -- and
+    only ``set_rate`` changes it. The current rate dips below the ceiling when we
+    are refused and climbs back as requests succeed, so a burst of 429s costs a
+    run seconds rather than leaving it throttled to the end.
     """
 
     def __init__(self, rate: float, capacity: float = 1.0) -> None:
         if rate <= 0:
             raise ValueError("rate must be positive")
         self._rate = rate
+        self._ceiling = rate
         self._capacity = max(capacity, 1.0)
         self._tokens = self._capacity
         self._last = time.monotonic()
@@ -39,9 +56,27 @@ class TokenBucket:
         return self._rate
 
     def set_rate(self, rate: float) -> None:
-        """Adjust pacing at runtime, e.g. from a service's rate-limit headers."""
+        """Set the ceiling: the fastest we will ever go for this host.
+
+        Used for policy, not for backoff -- the rate a service documents, or the
+        allowance it publishes in a header. The current rate is clamped to it,
+        and recovery will never climb past it again.
+        """
         with self._lock:
-            self._rate = max(rate, 1e-6)
+            self._ceiling = max(rate, 1e-6)
+            self._rate = min(self._rate, self._ceiling)
+
+    def penalise(self) -> None:
+        """Halve the rate, bounded below. Call when a service refuses us."""
+        with self._lock:
+            self._rate = max(self._rate / 2.0, self._ceiling / FLOOR_DIVISOR)
+
+    def recover(self) -> None:
+        """Edge the rate back toward the ceiling. Call on a successful request."""
+        with self._lock:
+            if self._rate < self._ceiling:
+                self._rate = min(self._ceiling,
+                                 self._rate + self._ceiling / RECOVERY_STEPS)
 
     def acquire(self, tokens: float = 1.0) -> None:
         while True:
