@@ -1,5 +1,51 @@
 # Changelog
 
+## 0.4.9
+
+Both of these came out of exercising the arXiv route that 0.4.8 repaired. Making
+a dead route work meant OpenAlex started returning records it had never returned
+before, and those records brought their own problems.
+
+### Fixed
+
+- **A 200 that is not a work no longer becomes a finding.** The OpenAlex DOI
+  route did `if data: return Found(_record(data))` with nothing checking that
+  the payload was a work. An error object served with a 200, a search-shaped
+  body, or a changed response all built a `Record` with an empty title, which
+  scores zero against the entry and lands in the report as a finding. A service
+  anomaly turned into an accusation about somebody's bibliography, which is the
+  one outcome this package exists to prevent. The route now requires an `id`
+  and reports anything else as unavailable.
+
+- **OpenAlex's year is no longer treated as authoritative.** It merges a
+  preprint with the versions published later, so `publication_year` can be a
+  reissue rather than the work the entry cites -- observed live reporting 2025
+  for a preprint posted in 2017. That produced `YEAR_MISMATCH` against a
+  perfectly correct reference. Same reasoning already applied to Open Library,
+  which reports an edition rather than the work. Crossref, DataCite, arXiv and
+  DBLP keep an authoritative year: a registration agency's date belongs to the
+  exact identifier in the entry, and a disagreement there is worth reporting.
+
+  Measured on four well-known preprints resolved through OpenAlex alone: two
+  findings before, none after, with the one remaining `NOT_FOUND` caused by
+  OpenAlex indexing an unrelated paper under `arxiv.org/abs/1810.04805`. In the
+  normal resolver order `arxiv:id` answers first and all four are `OK`.
+
+### Testing
+
+- Every resolver against every way a request can go wrong, as one matrix: an
+  unreachable service, a busy or broken server, a truncated body, a redirect
+  loop, an empty result set, and a 404. The property is stated once for all
+  eight sources -- an answer about the entry and a failure to reach the service
+  must never be confused -- rather than implied resolver by resolver.
+- The cases where the obvious reading is wrong now have their own tests: a 406
+  from content negotiation means the DOI is registered and the agency serves no
+  CSL, so it is not an absence; a 404 from arXiv is an anomaly, because arXiv
+  signals "no such id" with an empty feed.
+
+442 tests, 96% coverage.
+
+
 ## 0.4.8
 
 ### Fixed
