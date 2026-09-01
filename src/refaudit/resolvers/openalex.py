@@ -24,6 +24,16 @@ from .base import HttpResolver, RateSpec
 API = "https://api.openalex.org/works"
 
 
+def _is_work(data: Any) -> bool:
+    """Does this payload look like an OpenAlex work rather than something else?
+
+    Every work carries an ``id``. Checking for it distinguishes a real record
+    from an error object, a search-shaped body, or anything else served with a
+    200 that we would otherwise read as a work with no title.
+    """
+    return isinstance(data, dict) and bool(data.get("id"))
+
+
 def _record(work: dict[str, Any]) -> Record:
     authorships = work.get("authorships") or []
     surname = ""
@@ -47,6 +57,17 @@ class OpenAlex(HttpResolver):
     """Resolve by DOI, then arXiv id, then title."""
 
     name = "openalex"
+    #: OpenAlex merges a preprint with the versions published later, so this
+    #: year can be a reissue rather than the work the entry cites -- observed
+    #: live reporting 2025 for a preprint posted in 2017. A year we cannot rely
+    #: on must not produce YEAR_MISMATCH against a correct reference.
+    #:
+    #: Its arXiv landing-page index has the same character: of four preprints
+    #: sampled, one resolved to an entirely unrelated paper that claims the same
+    #: abs/ URL. That one the checker already handles, since a weak title match
+    #: from a search is not treated as identifier evidence. This is why OpenAlex
+    #: is registered as a fallback and never as the backbone.
+    year_is_authoritative = False
     api_base = API
     rate = RateSpec(
         per_second=3.0,
@@ -79,6 +100,14 @@ class OpenAlex(HttpResolver):
         if doi:
             url = f"{API}/https://doi.org/{urllib.parse.quote(doi, safe='/')}?{mailto}"
             data, problem = self._get_json(url)
+            if data is not None and not _is_work(data):
+                # A 200 carrying something that is not a work: an error object,
+                # a search-shaped body, a changed response. Reading it as a
+                # record yields an empty title, which scores zero against the
+                # entry and lands in the report as a finding -- a service
+                # anomaly turned into an accusation about somebody's
+                # bibliography, which is the one thing this must never do.
+                return Unavailable(self.name, "response was not a work record")
             if data:
                 return Found(_record(data))
             if isinstance(problem, Unavailable):
