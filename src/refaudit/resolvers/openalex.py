@@ -87,8 +87,18 @@ class OpenAlex(HttpResolver):
 
         arx = clean_arxiv_id(entry.arxiv_id)
         if arx:
+            # Both schemes, as an OR. OpenAlex stores the arXiv landing page as
+            # `http://arxiv.org/abs/...` and this filter is an exact string
+            # match, so asking only for `https://` matched nothing -- ever, for
+            # any preprint. It failed silently, because an empty result set
+            # looks exactly like "not indexed", and the route appeared to work
+            # while never once contributing. Matching either form also means
+            # this keeps working if OpenAlex normalises to https later, rather
+            # than trading one silent mismatch for the opposite one.
+            landing = (f"http://arxiv.org/abs/{arx}"
+                       f"|https://arxiv.org/abs/{arx}")
             q = urllib.parse.urlencode(
-                {"filter": f"locations.landing_page_url:https://arxiv.org/abs/{arx}",
+                {"filter": f"locations.landing_page_url:{landing}",
                  "select": self._SELECT, "per-page": 1, "mailto": self.contact_email}
             )
             data, problem = self._get_json(f"{API}?{q}")
