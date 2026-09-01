@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.4.8
+
+### Fixed
+
+- **The arXiv route through OpenAlex never matched anything.** OpenAlex records
+  an arXiv landing page as `http://arxiv.org/abs/...`, and the filter refaudit
+  used is an exact string match built with `https://`. Every preprint lookup
+  through OpenAlex returned an empty result set, for every arXiv identifier,
+  since the route was written.
+
+  It failed silently, which is why it survived: an empty result is
+  indistinguishable from "not indexed", so the route looked like it worked and
+  simply never contributed anything. That matters because the README tells
+  people to lean on OpenAlex when arXiv is rate-limiting them -- which it does
+  by IP, to an entire institution or VPN -- so the advertised fallback was
+  precisely the thing that did not work.
+
+  The filter now matches either scheme as an OR, so it also keeps working if
+  OpenAlex normalises to https later rather than trading one silent mismatch
+  for the opposite one. Verified against the live API: both test preprints now
+  resolve where they previously returned nothing.
+
+### Testing
+
+- Real OpenAlex responses captured as fixtures for the DOI and arXiv routes,
+  which was impossible until now: the account's daily budget was exhausted
+  every previous attempt today. `openalex.py` goes from 64% to 89%.
+- The arXiv query is asserted directly, so a scheme regression fails a test
+  rather than quietly returning nothing again.
+
+Overall coverage 94% to 95%, 338 tests.
+
+
 ## 0.4.7
 
 ### Fixed

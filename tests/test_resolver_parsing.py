@@ -20,6 +20,7 @@ a parser can plausibly mistake for data, so both get a test.
 from __future__ import annotations
 
 import json
+import urllib.parse
 from pathlib import Path
 
 import pytest
@@ -220,3 +221,71 @@ def test_a_429_from_an_identifier_lookup_is_not_an_absence(resolver_cls):
     out = r.resolve(_entry(doi="10.1145/3313831.3376727", title="Whatever"))
 
     assert isinstance(out, Unavailable), f"got {out!r}"
+
+
+# --- the arXiv route through OpenAlex --------------------------------------
+
+def _capture_urls(resolver):
+    """Record every URL a resolver asks for, answering nothing."""
+    seen: list[str] = []
+
+    def capture(url, **kw):
+        seen.append(url)
+        raise TransportError("stop here")
+
+    resolver.http.get = capture
+    return seen
+
+
+def test_the_openalex_arxiv_filter_uses_the_scheme_openalex_stores():
+    """OpenAlex records arXiv landing pages as `http://arxiv.org/abs/...`, and
+    the filter is an exact string match, so a query built with `https://`
+    matched nothing -- ever, for any preprint.
+
+    It failed silently: an empty result set is indistinguishable from "not
+    indexed", so the route looked like it worked and simply never contributed.
+    That matters because the README tells people to lean on OpenAlex when arXiv
+    itself is rate-limiting them, which is exactly when this route is needed.
+    """
+    r = OpenAlex(contact_email=EMAIL)
+    seen = _capture_urls(r)
+    r.resolve(_entry(eprint="1706.03762", title=""))
+
+    assert seen, "no request was made at all"
+    query = urllib.parse.unquote("".join(seen))
+    assert "http://arxiv.org/abs/1706.03762" in query, (
+        f"queried only https, which OpenAlex never matches: {query}"
+    )
+
+
+def test_the_openalex_arxiv_filter_accepts_either_scheme():
+    """Written as an OR so it keeps working if OpenAlex normalises to https
+    later, rather than trading one silent mismatch for the opposite one."""
+    r = OpenAlex(contact_email=EMAIL)
+    seen = _capture_urls(r)
+    r.resolve(_entry(eprint="1706.03762", title=""))
+
+    query = urllib.parse.unquote("".join(seen))
+    assert "https://arxiv.org/abs/1706.03762" in query
+    assert "|" in query, "the two forms must be an OR, not two round trips"
+
+
+def test_openalex_parses_a_real_doi_response():
+    r = _serve(OpenAlex(contact_email=EMAIL), "openalex-doi.json")
+    out = r.resolve(_entry(title="What is AI Literacy?"))
+
+    assert isinstance(out, Found)
+    assert out.record.title.startswith("What is AI Literacy?")
+    assert out.record.first_author_surname == "Long"
+    assert out.record.year == 2020
+
+
+def test_openalex_parses_a_real_arxiv_response():
+    """Captured with the corrected filter; before the fix this response could
+    not be obtained at all."""
+    r = _serve(OpenAlex(contact_email=EMAIL), "openalex-arxiv.json")
+    out = r.resolve(_entry(eprint="1706.03762", title="Attention Is All You Need"))
+
+    assert isinstance(out, Found)
+    assert out.record.title == "Attention Is All You Need"
+    assert out.record.first_author_surname == "Vaswani"
